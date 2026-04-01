@@ -307,76 +307,217 @@ function getRandomSpeech(agentId: AgentId, phase: string): string {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
+interface DeskPos { x: number; y: number; w: number; h: number }
 interface DeskSetup {
-  desk: { sprite: string; x: number; y: number; w: number; h: number };
-  chair: { sprite: string; x: number; y: number; w: number; h: number };
-  monitor: { sprite: string; x: number; y: number; w: number; h: number };
-  extra: { sprite: string; x: number; y: number; w: number; h: number };
+  desk: DeskPos;
+  chair: DeskPos;
+  monitor: DeskPos;
+  extra: DeskPos;
 }
 
-// Chairs BELOW desks (behind in top-down = lower Y value means further from viewer, higher Y = closer)
-// Workers sit between chair and desk
 const desks: DeskSetup[] = [
   {
-    desk:    { sprite: '/office/Sprite-0002.png', x: 85,  y: 220, w: 150, h: 125 },
-    chair:   { sprite: '/sprites/desk_chair_back.png', x: 119, y: 254, w: 48,  h: 96  },
-    monitor: { sprite: '/sprites/retro_tv_drama.gif', x: 117, y: 218, w: 48,  h: 48  },
-    extra:   { sprite: '/office/Sprite-0008.png', x: 185, y: 238, w: 40,  h: 40  },
+    desk:    { x: 85,  y: 220, w: 150, h: 125 },
+    chair:   { x: 119, y: 254, w: 48,  h: 96  },
+    monitor: { x: 117, y: 218, w: 48,  h: 48  },
+    extra:   { x: 185, y: 238, w: 40,  h: 40  },
   },
   {
-    desk:    { sprite: '/office/Sprite-0003.png', x: 290, y: 226, w: 160, h: 100 },
-    chair:   { sprite: '/sprites/desk_chair_back.png', x: 343, y: 250, w: 48,  h: 96  },
-    monitor: { sprite: '/sprites/retro_tv_weather.gif', x: 323, y: 222, w: 48,  h: 48  },
-    extra:   { sprite: '/office/Sprite-0010.png', x: 400, y: 240, w: 40,  h: 40  },
+    desk:    { x: 290, y: 226, w: 160, h: 100 },
+    chair:   { x: 343, y: 250, w: 48,  h: 96  },
+    monitor: { x: 323, y: 222, w: 48,  h: 48  },
+    extra:   { x: 400, y: 240, w: 40,  h: 40  },
   },
   {
-    desk:    { sprite: '/office/Sprite-0002.png', x: 490, y: 220, w: 150, h: 125 },
-    chair:   { sprite: '/sprites/desk_chair_back.png', x: 533, y: 250, w: 48,  h: 96  },
-    monitor: { sprite: '/sprites/retro_tv_weather_rain.gif', x: 523, y: 218, w: 48,  h: 48  },
-    extra:   { sprite: '/office/Sprite-0011.png', x: 590, y: 238, w: 40,  h: 40  },
+    desk:    { x: 490, y: 220, w: 150, h: 125 },
+    chair:   { x: 533, y: 250, w: 48,  h: 96  },
+    monitor: { x: 523, y: 218, w: 48,  h: 48  },
+    extra:   { x: 590, y: 238, w: 40,  h: 40  },
   },
   {
-    desk:    { sprite: '/office/Sprite-0006.png', x: 700, y: 226, w: 160, h: 100 },
-    chair:   { sprite: '/sprites/desk_chair_back.png', x: 753, y: 260, w: 48,  h: 96  },
-    monitor: { sprite: '/sprites/retro_tv_sports.gif', x: 733, y: 222, w: 48,  h: 48  },
-    extra:   { sprite: '/office/Sprite-0008.png', x: 810, y: 240, w: 40,  h: 40  },
+    desk:    { x: 700, y: 226, w: 160, h: 100 },
+    chair:   { x: 753, y: 260, w: 48,  h: 96  },
+    monitor: { x: 733, y: 222, w: 48,  h: 48  },
+    extra:   { x: 810, y: 240, w: 40,  h: 40  },
   },
   {
-    desk:    { sprite: '/office/Sprite-0002.png', x: 880, y: 220, w: 150, h: 125 },
-    chair:   { sprite: '/sprites/desk_chair_back.png', x: 920, y: 250, w: 48,  h: 96  },
-    monitor: { sprite: '/sprites/retro_tv_horror.gif', x: 910, y: 218, w: 48,  h: 48  },
-    extra:   { sprite: '/office/Sprite-0010.png', x: 980, y: 238, w: 40,  h: 40  },
+    desk:    { x: 880, y: 220, w: 150, h: 125 },
+    chair:   { x: 920, y: 250, w: 48,  h: 96  },
+    monitor: { x: 910, y: 218, w: 48,  h: 48  },
+    extra:   { x: 980, y: 238, w: 40,  h: 40  },
   },
 ];
 
-// Wall decorations — between window and desks
-const wallItems: { sprite: string; x: number; y: number; w: number; h: number }[] = [];
+// CSS furniture components
+function CSSDesk({ x, y, w, h }: DeskPos) {
+  return (
+    <div className="absolute" style={{ left: x, top: y, width: w, height: h, zIndex: 5 }}>
+      <div className="absolute inset-x-[5%] top-0 h-[35%] rounded-t-[4px] border border-black/20 bg-[#5c4a3a] shadow-[inset_0_2px_0_rgba(255,255,255,0.1)]" />
+      <div className="absolute bottom-[10%] left-[8%] h-[55%] w-[3px] bg-[#4a3a2e]" />
+      <div className="absolute bottom-[10%] right-[8%] h-[55%] w-[3px] bg-[#4a3a2e]" />
+      <div className="absolute inset-x-[5%] top-[8%] h-[4px] bg-[#6b5a48]" />
+    </div>
+  );
+}
 
-// Side wall items
-const sideWallItems = [
-  // Left wall
-  { sprite: '/office/Sprite-0026.png', x: 8,    y: 70,  w: 65, h: 55 },   // line chart
-  { sprite: '/office/Sprite-0027.png', x: 10,   y: 140, w: 60, h: 32 },   // bar chart
-  // Left wall — whiteboard above water cooler
-  { sprite: '/office/Sprite-0031.png', x: 2,    y: 175, w: 75, h: 42 },   // whiteboard
-  // Left floor
-  { sprite: '/office/Sprite-0013.png', x: 15,   y: 210, w: 55, h: 90 },   // water cooler
+function CSSChair({ x, y, w, h }: DeskPos) {
+  return (
+    <div className="absolute" style={{ left: x, top: y, width: w, height: h, zIndex: 4 }}>
+      <div className="absolute left-[15%] top-0 h-[40%] w-[70%] rounded-t-[6px] border border-black/15 bg-[#2a2a3a]" />
+      <div className="absolute left-[20%] top-[38%] h-[25%] w-[60%] rounded-[3px] bg-[#333345]" />
+      <div className="absolute bottom-[5%] left-[25%] h-[30%] w-[4px] bg-[#1a1a28]" />
+      <div className="absolute bottom-[5%] right-[25%] h-[30%] w-[4px] bg-[#1a1a28]" />
+    </div>
+  );
+}
 
-  // Right wall — shifted right off the window
-  { sprite: '/office/Sprite-0026.png', x: 1130, y: 70,  w: 60, h: 50 },   // line chart
-  { sprite: '/office/Sprite-0027.png', x: 1132, y: 130, w: 55, h: 30 },   // bar chart
-  { sprite: '/office/Sprite-0016.png', x: 1132, y: 170, w: 55, h: 50 },   // calendar
-];
+function CSSMonitor({ x, y, w, h }: DeskPos) {
+  return (
+    <div className="absolute" style={{ left: x, top: y, width: w, height: h, zIndex: 6 }}>
+      <div className="absolute inset-[8%] rounded-[3px] border border-black/30 bg-[#1a1a2e]">
+        <motion.div
+          className="absolute inset-[12%] rounded-[2px] bg-[#0a2a1a]"
+          animate={{ opacity: [0.6, 1, 0.6] }}
+          transition={{ duration: 3, repeat: Infinity }}
+        >
+          <div className="absolute left-[10%] top-[15%] h-[8%] w-[60%] rounded-full bg-[#33ff66]/40" />
+          <div className="absolute left-[10%] top-[30%] h-[8%] w-[80%] rounded-full bg-[#33ff66]/30" />
+          <div className="absolute left-[10%] top-[45%] h-[8%] w-[45%] rounded-full bg-[#33ff66]/35" />
+          <div className="absolute left-[10%] top-[60%] h-[8%] w-[70%] rounded-full bg-[#33ff66]/25" />
+          <div className="absolute left-[10%] top-[75%] h-[8%] w-[55%] rounded-full bg-[#33ff66]/30" />
+        </motion.div>
+      </div>
+      <div className="absolute bottom-0 left-1/2 h-[12%] w-[15%] -translate-x-1/2 bg-[#333]" />
+    </div>
+  );
+}
 
-// Floor props
-const floorItems = [
-  { sprite: '/office/Sprite-0032.png', x: 960, y: 240, w: 50, h: 20 },   // BOSS nameplate on supervisor desk
-  // Plants between desks
-  { sprite: '/office/plants/plant-1.png',  x: 240, y: 230, w: 28, h: 48 },
-  { sprite: '/office/plants/plant-5.png',  x: 470, y: 230, w: 28, h: 48 },
-  { sprite: '/office/plants/plant-10.png', x: 690, y: 230, w: 28, h: 48 },
-  { sprite: '/office/plants/plant-5.png',  x: 1140, y: 225, w: 28, h: 48 },
-];
+function CSSMug({ x, y, w, h }: DeskPos) {
+  return (
+    <div className="absolute" style={{ left: x, top: y, width: w, height: h, zIndex: 7 }}>
+      <div className="absolute bottom-[20%] left-[25%] h-[55%] w-[45%] rounded-b-[4px] border border-black/20 bg-[#e8e0d0]">
+        <div className="absolute right-[-30%] top-[15%] h-[50%] w-[30%] rounded-r-full border-2 border-l-0 border-black/15" />
+      </div>
+      <motion.div
+        className="absolute left-[30%] top-[5%] h-[20%] w-[8%] rounded-full bg-white/20"
+        animate={{ y: [0, -4, -8], opacity: [0.3, 0.15, 0] }}
+        transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+      />
+    </div>
+  );
+}
+
+function CSSPlant({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return (
+    <div className="absolute" style={{ left: x, top: y, width: w, height: h, zIndex: 7 }}>
+      <div className="absolute bottom-0 left-1/2 h-[35%] w-[50%] -translate-x-1/2 rounded-b-[4px] rounded-t-[2px] border border-black/15 bg-[#8b6b4a]" />
+      <div className="absolute bottom-[30%] left-1/2 h-[45%] w-[70%] -translate-x-1/2 rounded-full bg-[#2d6b3f]" />
+      <div className="absolute bottom-[45%] left-[20%] h-[35%] w-[40%] rounded-full bg-[#3a8a50]" />
+      <div className="absolute bottom-[50%] right-[15%] h-[30%] w-[35%] rounded-full bg-[#257a3a]" />
+    </div>
+  );
+}
+
+function CSSChart({ x, y, w, h, type }: { x: number; y: number; w: number; h: number; type: 'line' | 'bar' }) {
+  return (
+    <div className="absolute rounded-[2px] border border-black/20 bg-white/10" style={{ left: x, top: y, width: w, height: h, zIndex: 4 }}>
+      {type === 'line' ? (
+        <svg className="absolute inset-[15%]" viewBox="0 0 40 20" fill="none">
+          <polyline points="0,18 8,12 16,15 24,6 32,9 40,3" stroke="#33ff66" strokeWidth="1.5" opacity="0.6" />
+          <polyline points="0,16 8,14 16,10 24,12 32,5 40,8" stroke="#6699ff" strokeWidth="1" opacity="0.4" />
+        </svg>
+      ) : (
+        <div className="absolute inset-[15%] flex items-end gap-[8%]">
+          <div className="h-[60%] flex-1 bg-[#33ff66]/40" />
+          <div className="h-[80%] flex-1 bg-[#33ff66]/50" />
+          <div className="h-[45%] flex-1 bg-[#33ff66]/35" />
+          <div className="h-[90%] flex-1 bg-[#33ff66]/55" />
+          <div className="h-[70%] flex-1 bg-[#33ff66]/45" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CSSWhiteboard({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return (
+    <div className="absolute rounded-[2px] border-2 border-[#999] bg-[#f0ece4]" style={{ left: x, top: y, width: w, height: h, zIndex: 4 }}>
+      <div className="absolute left-[10%] top-[20%] h-[6%] w-[60%] rounded-full bg-[#e74c3c]/50" />
+      <div className="absolute left-[10%] top-[35%] h-[6%] w-[80%] rounded-full bg-[#3498db]/40" />
+      <div className="absolute left-[10%] top-[50%] h-[6%] w-[45%] rounded-full bg-[#2ecc71]/40" />
+      <div className="absolute left-[10%] top-[65%] h-[6%] w-[70%] rounded-full bg-[#333]/20" />
+    </div>
+  );
+}
+
+function CSSWaterCooler({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return (
+    <div className="absolute" style={{ left: x, top: y, width: w, height: h, zIndex: 5 }}>
+      <div className="absolute left-1/2 top-0 h-[30%] w-[40%] -translate-x-1/2 rounded-t-full border border-black/15 bg-[#a8d8ea]/60" />
+      <div className="absolute left-1/2 top-[28%] h-[55%] w-[55%] -translate-x-1/2 rounded-[3px] border border-black/15 bg-[#ddd]" />
+      <div className="absolute bottom-0 left-1/2 h-[15%] w-[65%] -translate-x-1/2 rounded-b-[3px] bg-[#999]" />
+    </div>
+  );
+}
+
+function CSSCalendar({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return (
+    <div className="absolute rounded-[2px] border border-black/20 bg-white/90" style={{ left: x, top: y, width: w, height: h, zIndex: 4 }}>
+      <div className="absolute inset-x-0 top-0 h-[20%] rounded-t-[2px] bg-[#e74c3c]" />
+      <div className="absolute inset-[15%] top-[25%] grid grid-cols-5 gap-[4%]">
+        {Array.from({ length: 15 }).map((_, i) => (
+          <div key={i} className="aspect-square rounded-[1px] bg-black/10" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CSSNameplate({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return (
+    <div className="absolute flex items-center justify-center rounded-[2px] border border-[#8b7355] bg-[#2a2218]" style={{ left: x, top: y, width: w, height: h, zIndex: 7 }}>
+      <span className="text-[7px] font-bold tracking-wider text-[#d4a847]">BOSS</span>
+    </div>
+  );
+}
+
+function CSSCouchFront({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return (
+    <div className="absolute" style={{ left: x, top: y, width: w, height: h, zIndex: 6 }}>
+      <div className="absolute inset-0 rounded-[6px] border border-black/20 bg-[#4a3a5c]" />
+      <div className="absolute left-[3%] top-[15%] h-[70%] w-[20%] rounded-[4px] bg-[#5a4a6e]" />
+      <div className="absolute right-[3%] top-[15%] h-[70%] w-[20%] rounded-[4px] bg-[#5a4a6e]" />
+    </div>
+  );
+}
+
+function CSSCushion({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return (
+    <div className="absolute rounded-[4px] border border-black/10 bg-[#6b5a7e] shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]"
+      style={{ left: x, top: y, width: w, height: h, zIndex: 6 }} />
+  );
+}
+
+function CSSRetroTV({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return (
+    <div className="absolute" style={{ left: x, top: y, width: w, height: h, zIndex: 6 }}>
+      <div className="absolute inset-0 rounded-[6px] border-2 border-black/30 bg-[#8b7355]">
+        <div className="absolute inset-[10%] rounded-[3px] border border-black/20 bg-[#1a1a2e]">
+          <motion.div
+            className="absolute inset-[8%] rounded-[2px] bg-[#0a1a2a]"
+            animate={{ opacity: [0.5, 0.8, 0.5] }}
+            transition={{ duration: 2, repeat: Infinity }}
+          >
+            <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.1)_50%)] bg-[length:100%_4px]" />
+          </motion.div>
+        </div>
+        <div className="absolute bottom-[8%] right-[8%] h-[8%] w-[8%] rounded-full bg-[#33ff66]/60" />
+      </div>
+      <div className="absolute left-[30%] top-[-15%] h-[20%] w-[4%] origin-bottom rotate-[-20deg] bg-[#555]" />
+      <div className="absolute right-[30%] top-[-15%] h-[20%] w-[4%] origin-bottom rotate-[20deg] bg-[#555]" />
+    </div>
+  );
+}
 
 const stars = [
   { left: 60, top: 38, size: 3 },
@@ -388,6 +529,17 @@ const stars = [
   { left: 950, top: 48, size: 3 },
   { left: 1100, top: 40, size: 4 },
 ];
+
+function Sprite({ src, x, y, w, h, z = 5 }: { src: string; x: number; y: number; w: number; h: number; z?: number }) {
+  return (
+    <img
+      src={src}
+      alt=""
+      className="absolute"
+      style={{ left: x, top: y, width: w, height: h, imageRendering: 'pixelated', objectFit: 'contain', zIndex: z }}
+    />
+  );
+}
 
 function WaterPipe({ x, y }: { x: number; y: number }) {
   return (
@@ -425,44 +577,6 @@ function WaterPipe({ x, y }: { x: number; y: number }) {
   );
 }
 
-function Sprite({ src, x, y, w, h, z = 5 }: { src: string; x: number; y: number; w: number; h: number; z?: number }) {
-  return (
-    <img
-      src={src}
-      alt=""
-      className="absolute"
-      style={{ left: x, top: y, width: w, height: h, imageRendering: 'pixelated', objectFit: 'contain', zIndex: z }}
-    />
-  );
-}
-
-// Slice a sprite from a sprite sheet using background clipping
-function SheetSprite({ sheet, sx, sy, sw, sh, x, y, w, h, z = 5 }: {
-  sheet: string; sx: number; sy: number; sw: number; sh: number;
-  x: number; y: number; w: number; h: number; z?: number;
-}) {
-  const scaleX = w / sw;
-  const scaleY = h / sh;
-  return (
-    <div
-      className="absolute overflow-hidden"
-      style={{ left: x, top: y, width: w, height: h, zIndex: z }}
-    >
-      <img
-        src={sheet}
-        alt=""
-        className="absolute"
-        style={{
-          imageRendering: 'pixelated',
-          left: -sx * scaleX,
-          top: -sy * scaleY,
-          width: 500 * scaleX,  // props.png is ~500px wide
-          height: 300 * scaleY, // ~300px tall
-        }}
-      />
-    </div>
-  );
-}
 
 function Worker({ worker, isActive, speech }: { worker: WorkerDef; isActive: boolean; speech?: string }) {
   return (
@@ -993,22 +1107,23 @@ export function LunarOfficeScene({
 
           {/* === PIXEL ART FURNITURE ON TOP === */}
 
-          {/* Wall decorations */}
-          {wallItems.map((item, i) => (
-            <Sprite key={`wall-${i}`} src={item.sprite} x={item.x} y={item.y} w={item.w} h={item.h} z={4} />
-          ))}
+          {/* Side wall items — CSS */}
+          <CSSChart x={8} y={70} w={65} h={55} type="line" />
+          <CSSChart x={10} y={140} w={60} h={32} type="bar" />
+          <CSSWhiteboard x={2} y={175} w={75} h={42} />
+          <CSSWaterCooler x={15} y={210} w={55} h={90} />
+          <CSSChart x={1130} y={70} w={60} h={50} type="line" />
+          <CSSChart x={1132} y={130} w={55} h={30} type="bar" />
+          <CSSCalendar x={1132} y={170} w={55} h={50} />
 
-          {/* Side wall items */}
-          {sideWallItems.map((item, i) => (
-            <Sprite key={`side-${i}`} src={item.sprite} x={item.x} y={item.y} w={item.w} h={item.h} z={4} />
-          ))}
+          {/* Floor props — CSS */}
+          <CSSNameplate x={960} y={240} w={50} h={20} />
+          <CSSPlant x={240} y={230} w={28} h={48} />
+          <CSSPlant x={470} y={230} w={28} h={48} />
+          <CSSPlant x={690} y={230} w={28} h={48} />
+          <CSSPlant x={1140} y={225} w={28} h={48} />
 
-          {/* Floor props */}
-          {floorItems.map((item, i) => (
-            <Sprite key={`floor-${i}`} src={item.sprite} x={item.x} y={item.y} w={item.w} h={item.h} z={6} />
-          ))}
-
-          {/* Ping pong table */}
+          {/* Ping pong table — original sprite */}
           <Sprite src="/sprites/pingpong.png" x={160} y={440} w={144} h={72} z={21} />
           {/* Ping pong ball — only when both players are there */}
           {pingPongActive && (
@@ -1024,12 +1139,9 @@ export function LunarOfficeScene({
             />
           )}
 
-          {/* Hookah lounge */}
-          {/* Left cushion */}
+          {/* Hookah lounge — original sprites */}
           <Sprite src="/sprites/cushion.png" x={835} y={455} w={48} h={24} z={6} />
-          {/* Right cushion */}
           <Sprite src="/sprites/cushion.png" x={951} y={455} w={48} h={24} z={6} />
-          {/* Front cushion */}
           <Sprite src="/sprites/cushion.png" x={893} y={500} w={48} h={24} z={6} />
           <Sprite src="/sprites/hookah.png" x={884} y={424} w={72} h={72} z={21} />
           {/* Hookah smoke — only when someone is using it */}
@@ -1066,9 +1178,9 @@ export function LunarOfficeScene({
             />
           </>}
 
-          {/* Flatscreen TV + couch */}
-          <Sprite src="/sprites/tv_sports.gif" x={1060} y={350} w={96} h={96} z={6} />
-          <Sprite src="/sprites/couch_back.png" x={1050} y={470} w={96} h={96} z={25} />
+          {/* TV + couch — CSS */}
+          <CSSRetroTV x={1060} y={350} w={96} h={96} />
+          <CSSCouchFront x={1050} y={470} w={96} h={96} />
 
           {/* "Water pipe" — on Reviewer's desk */}
           <WaterPipe x={390} y={245} />
@@ -1076,10 +1188,10 @@ export function LunarOfficeScene({
           {/* Desks with chairs BEHIND (below desk = higher Y) */}
           {desks.map((d, i) => (
             <div key={`desk-${i}`}>
-              <Sprite src={d.desk.sprite} x={d.desk.x} y={d.desk.y} w={d.desk.w} h={d.desk.h} z={10} />
-              <Sprite src={d.chair.sprite} x={d.chair.x} y={d.chair.y} w={d.chair.w} h={d.chair.h} z={25} />
-              <Sprite src={d.monitor.sprite} x={d.monitor.x} y={d.monitor.y} w={d.monitor.w} h={d.monitor.h} z={11} />
-              <Sprite src={d.extra.sprite} x={d.extra.x} y={d.extra.y} w={d.extra.w} h={d.extra.h} z={11} />
+              <CSSDesk x={d.desk.x} y={d.desk.y} w={d.desk.w} h={d.desk.h} />
+              <CSSChair x={d.chair.x} y={d.chair.y} w={d.chair.w} h={d.chair.h} />
+              <CSSMonitor x={d.monitor.x} y={d.monitor.y} w={d.monitor.w} h={d.monitor.h} />
+              <CSSMug x={d.extra.x} y={d.extra.y} w={d.extra.w} h={d.extra.h} />
               {activeWorkerIds.has(workers[i]?.id) && (
                 <motion.div
                   className="absolute z-[9] rounded-xl"

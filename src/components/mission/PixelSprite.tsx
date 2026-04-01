@@ -1,7 +1,6 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { useEffect, useRef, useState } from 'react';
 
 interface PixelSpriteProps {
   id: string;
@@ -18,172 +17,189 @@ interface PixelSpriteProps {
   title?: string;
 }
 
-/* Sprite sheet layout: 256×128, 32×32 cells
-   8 columns (walk frames), 4 rows (front/back/left/right)
-   Row 0 = front (facing camera), 1 = back, 2 = left, 3 = right
-   Frame 0 = idle standing pose */
-
-const SCALE = 3;
-const CELL = 32;
-const COLS = 8;
-const FRAME_PX = CELL * SCALE;           // 96
-const SHEET_W = CELL * COLS * SCALE;     // 768
-const SHEET_H = CELL * 4 * SCALE;       // 384
-const WALK_FPS = 150; // ms per frame
-
-const spriteFile: Record<string, string> = {
-  planner:    '/sprites/alexis.png',
-  reviewer:   '/sprites/brad.png',
-  coder:      '/sprites/carlos.png',
-  tester:     '/sprites/dana.png',
-  supervisor: '/sprites/sal.png',
-};
-
-const dirRow: Record<string, number> = {
-  right: 2,
-  left:  3,
-  back:  1,
-  front: 0,
-};
-
-export function PixelSprite({
-  id, name, bodyColor, x, y,
-  isActive, isWalking, isWaiting = false,
-  facing = 'right', carrying = false, speech = null, title,
-}: PixelSpriteProps) {
-  const [frame, setFrame] = useState(0);
-  const [moving, setMoving] = useState(false);
-
-  // Start moving when position changes
-  useEffect(() => {
-    if (dist < 5) return;
-    setMoving(true);
-  }, [x, y]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Walk animation: cycle frames only while physically moving
-  useEffect(() => {
-    if (!moving) { setFrame(0); return; }
-    const iv = setInterval(() => setFrame(f => (f + 1) % COLS), WALK_FPS);
-    return () => clearInterval(iv);
-  }, [moving]);
-
-  const row = dirRow[facing] ?? 0;
-  const bgX = -frame * FRAME_PX;
-  const bgY = -row * FRAME_PX;
-  const src = spriteFile[id] || spriteFile.coder;
-
-  // Scale transition duration by distance (~4s per 500px)
-  const prevPos = useRef({ x, y });
-  const dist = Math.hypot(x - prevPos.current.x, y - prevPos.current.y);
-  const moveDuration = Math.max(2, (dist / 500) * 5);
-  useEffect(() => { prevPos.current = { x, y }; }, [x, y]);
-
+function Hair({ id }: { id: string }) {
+  // Planner — long dark purple hair
+  if (id === 'planner') return (
+    <>
+      <div className="absolute left-[14%] top-[-2%] h-[32%] w-[72%] rounded-t-full rounded-b-[35%] bg-[#4b2a74]" />
+      <div className="absolute left-[8%] top-[18%] h-[28%] w-[16%] rounded-full bg-[#4b2a74]" />
+    </>
+  );
+  // Reviewer — short brown side part
+  if (id === 'reviewer') return (
+    <>
+      <div className="absolute left-[10%] top-[0%] h-[24%] w-[76%] rounded-t-full bg-[#3f3224]" />
+      <div className="absolute right-[10%] top-[12%] h-[18%] w-[20%] -rotate-[18deg] rounded-full bg-[#3f3224]" />
+    </>
+  );
+  // Coder — spiky dark hair
+  if (id === 'coder') return (
+    <>
+      <div className="absolute left-[18%] top-[2%] h-[20%] w-[64%] rounded-full bg-[#2f3644]" />
+      <div className="absolute left-[26%] top-[-6%] h-[18%] w-[14%] rounded-full bg-[#2f3644]" />
+      <div className="absolute left-[44%] top-[-10%] h-[20%] w-[16%] rounded-full bg-[#2f3644]" />
+      <div className="absolute left-[62%] top-[-4%] h-[16%] w-[12%] rounded-full bg-[#2f3644]" />
+    </>
+  );
+  // Tester — auburn bob
+  if (id === 'tester') return (
+    <>
+      <div className="absolute left-[12%] top-[0%] h-[26%] w-[70%] rounded-t-full bg-[#74563a]" />
+      <div className="absolute right-[2%] top-[18%] h-[18%] w-[18%] rounded-full bg-[#74563a]" />
+    </>
+  );
+  // Supervisor — short dark buzz
   return (
     <>
-      {/* Character sprite — z-20, behind furniture */}
-      <motion.div
-        className="absolute"
-        style={{ width: FRAME_PX, height: FRAME_PX, transform: 'translate(-50%, -100%)', zIndex: 20 }}
-        animate={{ left: x, top: y }}
-        transition={{ duration: moveDuration, ease: 'easeInOut' }}
-        onAnimationComplete={() => setMoving(false)}
-      >
-        <motion.div
-          className="relative"
-          style={{ width: FRAME_PX, height: FRAME_PX }}
-          animate={
-            moving
-              ? { y: [0, -3, 0, -3, 0] }
-              : isActive
-              ? { y: [0, -1.5, 0] }
-              : { y: [0, -0.5, 0] }
-          }
-          transition={{
-            duration: moving ? 0.56 : isActive ? 1.0 : 1.8,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-        >
-          <motion.div
-            className="absolute bottom-0 left-1/2 h-[6px] w-10 -translate-x-1/2 rounded-full bg-black/30 blur-[2px]"
-            style={{ display: facing === 'back' && !isWalking ? 'none' : undefined }}
-            animate={
-              moving
-                ? { scaleX: [0.8, 1.3, 0.8], scaleY: [1.2, 0.8, 1.2] }
-                : { scaleX: [1, 1.05, 1] }
-            }
-            transition={{
-              duration: moving ? 0.56 : 1.8,
-              repeat: Infinity,
-              ease: 'easeInOut',
-            }}
-          />
-          <div
-            style={{
-              width: FRAME_PX,
-              height: FRAME_PX,
-              backgroundImage: `url(${src})`,
-              backgroundSize: `${SHEET_W}px ${SHEET_H}px`,
-              backgroundPosition: `${bgX}px ${bgY}px`,
-              backgroundRepeat: 'no-repeat',
-              imageRendering: 'pixelated',
-            }}
-          />
-          {isActive && (
-            <motion.div
-              className="absolute -right-1 top-[30%] h-3 w-3 rounded-full"
-              style={{ backgroundColor: bodyColor, boxShadow: `0 0 6px ${bodyColor}` }}
-              animate={{ opacity: [1, 0.5, 1] }}
-              transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-            />
-          )}
-          {isWaiting && (
-            <motion.div
-              className="absolute left-1/2 top-[8px] flex -translate-x-1/2 gap-[2px]"
-              animate={{ opacity: [0.4, 1, 0.4] }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-            >
-              <div className="h-[3px] w-[3px] rounded-full bg-white/60" />
-              <div className="h-[3px] w-[3px] rounded-full bg-white/60" />
-              <div className="h-[3px] w-[3px] rounded-full bg-white/60" />
-            </motion.div>
-          )}
-          {carrying && (
-            <motion.div
-              className="absolute -right-2 top-[50%] h-5 w-4 rounded-[2px] border border-[#6c5a43] bg-[#efe4cf]"
-              animate={{ y: [0, -1, 0], rotate: [0, 4, 0] }}
-              transition={{ duration: 0.5, repeat: Infinity, ease: 'easeInOut' }}
-            >
-              <div className="absolute inset-x-[18%] top-[18%] h-[6%] rounded-full bg-[#b8aea0]" />
-              <div className="absolute inset-x-[18%] top-[34%] h-[6%] rounded-full bg-[#b8aea0]" />
-              <div className="absolute inset-x-[18%] top-[50%] h-[6%] rounded-full bg-[#b8aea0]" />
-            </motion.div>
-          )}
-        </motion.div>
-      </motion.div>
+      <div className="absolute left-[18%] top-[6%] h-[14%] w-[52%] rounded-full bg-[#1f2937]" />
+      <div className="absolute left-[58%] top-[2%] h-[12%] w-[12%] rounded-full bg-[#1f2937]" />
+    </>
+  );
+}
 
-      {/* Speech bubble — separate z-50 layer, above all furniture */}
+export function PixelSprite({ id, name, bodyColor, x, y, isActive, isWalking, isWaiting = false, facing = 'right', carrying = false, speech = null, title }: PixelSpriteProps) {
+  const walkSpeed = 0.28;
+  const idleSpeed = 1.8;
+  const activeSpeed = 1.0;
+  const bobDuration = isWalking ? walkSpeed : isActive ? activeSpeed : idleSpeed;
+
+  return (
+    <motion.div
+      className="absolute z-20"
+      animate={{ left: x, top: y }}
+      transition={{
+        duration: 2.5,
+        ease: 'easeInOut',
+      }}
+      style={{ transform: 'translate(-50%, -100%)' }}
+    >
+      {/* Speech bubble */}
       {speech && (
         <motion.div
-          className="absolute"
-          style={{ transform: 'translate(-50%, -100%)', zIndex: 50 }}
-          initial={{ left: x, top: y }}
-          animate={{ left: x, top: y }}
-          transition={{ duration: moveDuration, ease: 'easeInOut' }}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          className="absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/20 bg-black/80 px-2 py-1 text-[9px] leading-tight text-white/90"
+          style={{ maxWidth: 180, whiteSpace: 'normal' }}
         >
-          <motion.div
-            initial={{ opacity: 0, y: 4, scale: 0.92 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -3, scale: 0.95 }}
-            transition={{ duration: 0.25 }}
-            className="absolute bottom-[100px] left-[calc(50%-105px)] rounded-lg border border-white/15 bg-black/85 px-3.5 py-2.5 text-[13px] leading-snug text-white backdrop-blur-sm"
-            style={{ width: 210 }}
-          >
-            {speech}
-            <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-black/85" />
-          </motion.div>
+          {speech}
+          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-black/80" />
         </motion.div>
       )}
-    </>
+
+      {/* Whole body container */}
+      <motion.div
+        className="relative h-[70px] w-[42px]"
+        animate={
+          isWalking
+            ? { y: [0, -4, 0, -4, 0], rotate: [-2, 2, -2, 2, -2] }
+            : isActive
+            ? { y: [0, -1, 0] }
+            : { y: [0, -0.5, 0] }
+        }
+        transition={{ duration: isWalking ? walkSpeed * 2 : bobDuration, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ transform: facing === 'left' ? 'scaleX(-1)' : 'scaleX(1)' }}
+      >
+        {/* Shadow */}
+        <motion.div
+          className="absolute bottom-0 left-1/2 h-2 w-7 -translate-x-1/2 rounded-full bg-black/35 blur-[2px]"
+          animate={
+            isWalking
+              ? { scaleX: [0.8, 1.3, 0.8, 1.3, 0.8], scaleY: [1.2, 0.8, 1.2, 0.8, 1.2] }
+              : { scaleX: [1, 1.05, 1] }
+          }
+          transition={{ duration: isWalking ? walkSpeed * 2 : idleSpeed, repeat: Infinity, ease: 'easeInOut' }}
+        />
+
+        {/* Head */}
+        <div className="absolute left-1/2 top-0 h-7 w-7 -translate-x-1/2 rounded-full border border-black/30 bg-[#d9d3c4] shadow-[inset_0_2px_0_rgba(255,255,255,0.25)]">
+          <Hair id={id} />
+          <div className="absolute left-1.5 top-3.5 h-1 w-1 rounded-full bg-black/70" />
+          <div className="absolute right-1.5 top-3.5 h-1 w-1 rounded-full bg-black/70" />
+          <div className="absolute left-1/2 top-5 h-[2px] w-3 -translate-x-1/2 rounded-full bg-black/55" />
+        </div>
+
+        {/* Neck */}
+        <div className="absolute left-1/2 top-[26px] h-2 w-2 -translate-x-1/2 rounded-sm bg-[#8ea0b9]" />
+
+        {/* Body */}
+        <div
+          className="absolute left-1/2 top-7 h-8 w-6 -translate-x-1/2 rounded-[4px] border border-black/30"
+          style={{ backgroundColor: bodyColor }}
+        >
+          <div className="absolute left-[28%] top-[42%] h-[30%] w-[30%] rounded-full bg-white/20" />
+          <div className="absolute right-1 top-1.5 h-1.5 w-1.5 rounded-sm bg-white/30" />
+        </div>
+
+        {/* Left arm */}
+        <motion.div
+          className="absolute left-1 top-7 h-5 w-1.5 origin-top rounded-full bg-[#d9d3c4]"
+          animate={
+            isWalking
+              ? { rotate: [30, -20, 30, -20, 30] }
+              : isActive
+              ? { rotate: [-15, -8, -15] }
+              : { rotate: [6, 10, 6] }
+          }
+          transition={{ duration: isWalking ? walkSpeed * 2 : bobDuration, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        {/* Right arm */}
+        <motion.div
+          className="absolute right-1 top-7 h-5 w-1.5 origin-top rounded-full bg-[#d9d3c4]"
+          animate={
+            isWalking
+              ? { rotate: [-20, 30, -20, 30, -20] }
+              : isActive
+              ? { rotate: [15, 8, 15] }
+              : { rotate: [-6, -10, -6] }
+          }
+          transition={{ duration: isWalking ? walkSpeed * 2 : bobDuration, repeat: Infinity, ease: 'easeInOut' }}
+        />
+
+        {/* Left leg */}
+        <motion.div
+          className="absolute bottom-1 left-[1rem] h-5 w-1.5 origin-top rounded-full bg-[#30415d]"
+          animate={
+            isWalking
+              ? { rotate: [25, -18, 25, -18, 25] }
+              : { rotate: [1, 2, 1] }
+          }
+          transition={{ duration: isWalking ? walkSpeed * 2 : idleSpeed, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        {/* Right leg */}
+        <motion.div
+          className="absolute bottom-1 right-[1rem] h-5 w-1.5 origin-top rounded-full bg-[#30415d]"
+          animate={
+            isWalking
+              ? { rotate: [-18, 25, -18, 25, -18] }
+              : { rotate: [-1, -2, -1] }
+          }
+          transition={{ duration: isWalking ? walkSpeed * 2 : idleSpeed, repeat: Infinity, ease: 'easeInOut' }}
+        />
+
+        {/* Document being carried */}
+        {carrying && (
+          <motion.div
+            className="absolute -right-2 top-9 h-5 w-4 rounded-[2px] border border-[#6c5a43] bg-[#efe4cf]"
+            animate={{ y: [0, -1, 0], rotate: [0, 4, 0] }}
+            transition={{ duration: 0.5, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <div className="absolute inset-x-[18%] top-[20%] h-[10%] rounded-full bg-[#b8aea0]" />
+            <div className="absolute inset-x-[18%] top-[40%] h-[10%] rounded-full bg-[#b8aea0]" />
+            <div className="absolute inset-x-[18%] top-[60%] h-[10%] rounded-full bg-[#b8aea0]" />
+          </motion.div>
+        )}
+
+        {/* Active glow */}
+        {isActive && (
+          <div className="absolute -right-1 top-1 h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(34,197,94,0.5)]" />
+        )}
+      </motion.div>
+
+      {/* Name label */}
+      <div className="mt-0.5 rounded-sm border border-black/20 bg-black/60 px-1.5 py-0.5 text-center text-[9px] uppercase tracking-[0.16em] text-white/80">
+        {title || name}
+      </div>
+    </motion.div>
   );
 }
