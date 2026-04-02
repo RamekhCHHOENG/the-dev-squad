@@ -14,11 +14,11 @@ Agent permissions are enforced by a `PreToolUse` hook (`pipeline/.claude/hooks/a
 
 The hook reliably prevents:
 
-- **Accidental writes outside `~/Builds/`** — path prefix check with trailing slash, canonicalized via `readlink -f`
-- **Accidental writes to `.claude/` config** — case pattern blocks Write/Edit/NotebookEdit to `.claude/` paths
-- **Agent A writing code files** — only `plan.md` allowed
-- **Agents B and D writing anything** — all writes blocked
-- **Agent C modifying `plan.md`** — locked after review
+- **Accidental `Write`/`Edit`/`NotebookEdit` outside `~/Builds/`** — path prefix check with trailing slash, canonicalized via `readlink -f`
+- **Accidental writes to `.claude/` config via file-edit tools** — case pattern blocks `Write`/`Edit`/`NotebookEdit` to `.claude/` paths
+- **Agent A writing code files via file-edit tools** — only `plan.md` allowed
+- **Agents B and D writing via file-edit tools** — all `Write`/`Edit`/`NotebookEdit` calls blocked
+- **Agent C modifying `plan.md` via file-edit tools** — locked after review
 - **Agents A and B running Bash** — blocked entirely
 - **Any agent spawning sub-agents** — Agent tool blocked for all
 - **Path traversal via `..`** — rejected before resolution
@@ -27,6 +27,7 @@ The hook reliably prevents:
 - **Missing/malformed tool names** — rejected on parse
 - **Phase 0 writes by Agent A** — blocked, defaults to blocked if events file missing
 - **Symlink-based path escapes** — resolved via `readlink -f`
+- **`cd`-then-`Write` drift across Bash commands** — mitigated by setting `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, which resets Claude's working directory after each Bash command
 
 ## What the Hook Does NOT Catch
 
@@ -41,8 +42,8 @@ The hook blocks `ln` commands and resolves symlinks via `readlink -f`, but `read
 **Glob-based `.claude/` bypass (V1 — PARTIALLY MITIGATED)**
 The hook blocks `mv`/`cp`/`rm` with dot-file glob patterns and direct `.claude` references. However, sufficiently creative glob patterns or indirect shell expansion could evade the filters. Moving the hook outside the agent-writable tree would be the correct fix.
 
-**Cross-project writes (P1 — FIXED)**
-Agents A-D are now jailed to their current project directory (CWD), not all of `~/Builds/`. Agent S retains access to all of `~/Builds/` for diagnostics.
+**Cross-project writes via Bash (OPEN)**
+Agents A-D are now jailed to their current project directory for `Write`/`Edit`/`NotebookEdit`, and pipeline sessions set `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` so a Bash `cd` does not persist into later file-edit tool calls. However, Bash itself remains a direct write channel for agents C, D, and S. Agent C can still write to sibling projects with shell redirection in a single Bash command, and agent D can still write via Bash despite being read-only at the file-edit-tool layer.
 
 **TOCTOU race conditions**
 The hook resolves file paths at check time. Between the check and the actual tool execution, symlinks could be retargeted. This is a fundamental limitation of check-then-act in a separate process.
@@ -56,7 +57,8 @@ Docker is one way to get stronger isolation, but it is not the only way. Contain
 
 | Issue | Fixable in Hook? | Needs Design / Permission Change? | Needs OS Isolation for Strong Guarantee? |
 |-------|------------------|-----------------------------------|------------------------------------------|
-| Cross-project writes under `~/Builds/` | Yes — **FIXED** | No | No |
+| Cross-project writes via `Write`/`Edit`/`NotebookEdit` | Yes — **FIXED** | No | No |
+| Cross-project writes via Bash | No | Yes — gate all Bash for C/D, remove Bash, or replace it with allowlisted operations | Yes, if unrestricted Bash must remain available |
 | Agent A WebSearch exfiltration | No | Yes — reduce, proxy, or remove web access | No |
 | Indirect execution via `python3 -c`, `eval`, base64, etc. | No | Yes — remove Bash, require approval for all Bash, or replace shell access with allowlisted operations | Yes, if Bash must remain available |
 | Hardlink bypass | Partial mitigation only | Yes — move protected files out of agent-writable trees and reduce shell/file authority | Yes, if you need a reliable guarantee |
@@ -64,26 +66,30 @@ Docker is one way to get stronger isolation, but it is not the only way. Contain
 
 In short:
 
-- **Fix in hook:** cross-project writes
-- **Fix by changing permissions/product design:** indirect execution and WebSearch risk
-- **Needs OS-level isolation for a strong guarantee:** hardlinks and TOCTOU, and indirect execution if Bash remains available
+- **Fix in hook:** cross-project writes through `Write`/`Edit`/`NotebookEdit`
+- **Fix by changing permissions/product design:** Bash-mediated writes, indirect execution, and WebSearch risk
+- **Needs OS-level isolation for a strong guarantee:** hardlinks and TOCTOU, and Bash-mediated escapes if Bash remains available
 
 ## Current Permission Matrix
+
+The `Write` column below refers to file-edit tools (`Write`, `Edit`, `NotebookEdit`), not shell redirection inside Bash.
 
 | Agent | Read | Write | Bash | WebSearch | WebFetch | Agent Tool |
 |-------|------|-------|------|-----------|----------|------------|
 | S | Anywhere | `~/Builds/` only (no `.claude/`) | Yes (pattern-restricted) | No | No | No |
-| A | Anywhere | `plan.md` only in `~/Builds/` (no Phase 0) | No | Yes | No | No |
+| A | Anywhere | `plan.md` only in the current project under `~/Builds/` (no Phase 0) | No | Yes | No | No |
 | B | Anywhere | No | No | No | No | No |
-| C | Anywhere | `~/Builds/` (no `plan.md`, no `.claude/`) | Yes (pattern-restricted) | No | No | No |
+| C | Anywhere | Current project under `~/Builds/` (no `plan.md`, no `.claude/`) | Yes (pattern-restricted) | No | No | No |
 | D | Anywhere | No | Yes (pattern-restricted) | No | No | No |
+
+Pipeline sessions also set `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, which resets Claude's working directory after each Bash command. This mitigates `cd`-then-`Write` drift, but it does not make Bash read-only.
 
 ## Recommended Hardening (Future)
 
 For stronger isolation:
-1. **Per-project write jail** — restrict writes to the active project directory, not all of `~/Builds/`
-2. **Docker containers or equivalent OS sandbox** — run each agent session in an isolated environment with only the intended project directory writable
-3. **Remove Bash for C/D** — require human approval for all bash commands, not just dangerous ones
+1. **Strict mode for C/D** — require human approval for every Bash call from the coder and tester, not just obviously dangerous ones
+2. **Per-project write jail** — keep file-edit tools restricted to the active project directory, not all of `~/Builds/`
+3. **Docker containers or equivalent OS sandbox** — run each agent session in an isolated environment with only the intended project directory writable
 4. **Move `.claude/` outside `~/Builds/`** — put hooks and settings in a location agents can never reach
 5. **Allowlist over blocklist** — instead of blocking bad bash patterns, only allow specific safe commands
 

@@ -184,17 +184,21 @@ Agents are constrained by a `PreToolUse` hook that gates every tool call. The ho
 
 | Agent | Can Write | Can Run Bash | Can Spawn Agents |
 |-------|-----------|-------------|-----------------|
-| A (Planner) | `plan.md` only | No | No |
+| A (Planner) | `plan.md` only in the current project | No | No |
 | B (Reviewer) | Nothing | No | No |
-| C (Coder) | Inside `~/Builds/` (except `plan.md`) | Yes (dangerous cmds need approval) | No |
+| C (Coder) | Current project only (except `plan.md`) | Yes (dangerous cmds need approval) | No |
 | D (Tester) | Nothing | Yes (dangerous cmds need approval) | No |
 | S (Supervisor) | `~/Builds/` only (no `.claude/`) | Yes (pattern-restricted) | No |
 
 Additional protections:
-- No agent can write outside `~/Builds/`
+- `Write`/`Edit`/`NotebookEdit` are jailed to the current project for A/C and blocked for B/D
+- Pipeline sessions set `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, so Bash `cd` does not persist into later file-edit tool calls
 - Plan is locked after B approves — no agent can modify it
 - Safe bash commands auto-approve, dangerous ones require your click
 - All sessions use `--permission-mode auto` for Claude's built-in safety classifier
+
+Roadmap:
+- **Strict mode** — require human approval for every Bash call from C and D for users who want stronger guardrails at the cost of speed
 
 ---
 

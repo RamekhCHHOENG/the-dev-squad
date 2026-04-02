@@ -268,7 +268,13 @@ function claude(
     const child = spawn('claude', args, {
       cwd: projectDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PIPELINE_AGENT: agent },
+      env: {
+        ...process.env,
+        PIPELINE_AGENT: agent,
+        // Reset Claude's working directory after each Bash command so a `cd`
+        // does not persist into later Write/Edit tool calls.
+        CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1',
+      },
     });
 
     let lastResult: Record<string, unknown> | null = null;

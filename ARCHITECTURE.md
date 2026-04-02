@@ -62,17 +62,21 @@ Restrictions are enforced by a `PreToolUse` hook (`pipeline/.claude/hooks/approv
 
 | Agent | Write | Bash | Agent Tool |
 |-------|-------|------|------------|
-| **A** (Planner) | `plan.md` only | Blocked | Blocked |
+| **A** (Planner) | `plan.md` only in the current project | Blocked | Blocked |
 | **B** (Reviewer) | Blocked | Blocked | Blocked |
-| **C** (Coder) | Inside `~/Builds/` (except plan.md) | Safe=auto, dangerous=approval | Blocked |
+| **C** (Coder) | Current project only (except plan.md) | Safe=auto, dangerous=approval | Blocked |
 | **D** (Tester) | Blocked | Safe=auto, dangerous=approval | Blocked |
 | **S** (Supervisor) | `~/Builds/` only (no `.claude/`) | Yes (restricted) | Blocked |
 
 Additional protections:
-- All writes outside `~/Builds/` are blocked for every agent
+- `Write`/`Edit`/`NotebookEdit` are jailed to the active project for A/C and blocked for B/D
+- Pipeline sessions set `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`, so Bash `cd` does not persist into later file-edit tool calls
 - Plan is locked after B approves
 - Agent tool blocked for all agents (prevents recursive spawning)
 - `--permission-mode auto` adds Claude's AI safety classifier on top
+
+Roadmap:
+- **Strict mode** — require human approval for every Bash call from agents C and D for users who prefer stronger guardrails over full autonomy
 
 ## Agent Communication
 

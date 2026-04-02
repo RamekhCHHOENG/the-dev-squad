@@ -97,7 +97,9 @@ function streamClaude(
     const child = spawn('claude', args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env,
+      // Reset Claude's working directory after each Bash command so a `cd`
+      // does not persist into later Write/Edit tool calls.
+      env: { ...env, CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1' },
     });
 
     const rl = createInterface({ input: child.stdout });
