@@ -189,9 +189,16 @@ function handleManual(agent: string, message: string, model: string) {
   agentStatus[agent] = 'active';
   state.agentStatus = agentStatus;
 
-  // Append user message
+  // Append event — detect handoffs vs regular user messages
   const events = (state.events as Array<Record<string, unknown>>) || [];
-  events.push({ time: new Date().toISOString(), agent, phase: 'concept', type: 'user_msg', text: `You: ${message}` });
+  const handoffMatch = message.match(/^\[HANDOFF:(\w)→(\w)\]\s/);
+  if (handoffMatch) {
+    const fromAgent = handoffMatch[1];
+    const handoffText = message.replace(/^\[HANDOFF:\w→\w\]\s/, '').replace(/\n\nReview this and continue the work\.$/, '');
+    events.push({ time: new Date().toISOString(), agent: fromAgent, phase: 'concept', type: 'handoff', text: `→ ${agent}: ${handoffText}` });
+  } else {
+    events.push({ time: new Date().toISOString(), agent, phase: 'concept', type: 'user_msg', text: `You: ${message}` });
+  }
   state.events = events;
   writeFileSync(eventsFile, JSON.stringify(state, null, 2));
 

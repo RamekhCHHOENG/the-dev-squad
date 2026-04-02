@@ -59,7 +59,6 @@ export default function PipelinePage() {
   const [pendingApproval, setPendingApproval] = useState<Record<string, unknown> | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<AgentId | null>(null);
   const [panelInputs, setPanelInputs] = useState<Record<string, string>>({ A: '', B: '', C: '', D: '' });
-  const [pendingHandoff, setPendingHandoff] = useState<{ from: AgentId; text: string } | null>(null);
 
   const panelRefs = useRef<Record<string, HTMLDivElement | null>>({ A: null, B: null, C: null, D: null, S: null });
   const modalRef = useRef<HTMLDivElement>(null);
@@ -168,18 +167,11 @@ export default function PipelinePage() {
     setExpandedAgent(null);
     setChatInput('');
     setPanelInputs({ A: '', B: '', C: '', D: '' });
-    setPendingHandoff(null);
   }
 
   async function handlePanelSend(id: AgentId) {
     let msg = panelInputs[id]?.trim();
     if (sendingAgents.has(id) || !msg) return;
-
-    // Prepend handoff context if pending
-    if (pendingHandoff && pendingHandoff.from !== id) {
-      msg = `[Handoff from Agent ${pendingHandoff.from}]: ${pendingHandoff.text}\n\n${msg}`;
-      setPendingHandoff(null);
-    }
 
     setSendingAgents(prev => new Set([...prev, id]));
     setSelectedAgent(id);
@@ -192,23 +184,21 @@ export default function PipelinePage() {
     if (!expandedAgent || sendingAgents.has(expandedAgent) || !chatInput.trim()) return;
     let msg = chatInput.trim();
 
-    if (pendingHandoff && pendingHandoff.from !== expandedAgent) {
-      msg = `[Handoff from Agent ${pendingHandoff.from}]: ${pendingHandoff.text}\n\n${msg}`;
-      setPendingHandoff(null);
-    }
-
     setSendingAgents(prev => new Set([...prev, expandedAgent]));
     await sendChat(expandedAgent, msg);
     setChatInput('');
     setSendingAgents(prev => { const n = new Set(prev); n.delete(expandedAgent!); return n; });
   }
 
-  function handleHandoff(fromAgent: AgentId) {
+  async function handleHandoff(fromAgent: AgentId, toAgent: AgentId) {
     const textEvents = state.events.filter(e => e.agent === fromAgent && e.type === 'text');
     if (textEvents.length === 0) return;
     let text = textEvents[textEvents.length - 1].text;
     if (text.length > 2000) text = text.slice(0, 2000) + '...(truncated)';
-    setPendingHandoff({ from: fromAgent, text });
+    const msg = `[HANDOFF:${fromAgent}→${toAgent}] ${text}\n\nReview this and continue the work.`;
+    setSendingAgents(prev => new Set([...prev, toAgent]));
+    await sendChat(toAgent, msg);
+    setSendingAgents(prev => { const n = new Set(prev); n.delete(toAgent); return n; });
   }
 
   const phase = state.currentPhase;
@@ -423,15 +413,6 @@ export default function PipelinePage() {
             </>
           )}
 
-          {/* Pending handoff indicator */}
-          {pendingHandoff && (
-            <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-blue-400">Handoff from Agent {pendingHandoff.from}</div>
-              <p className="mt-1 text-[11px] leading-relaxed text-blue-300/70">{pendingHandoff.text.slice(0, 100)}{pendingHandoff.text.length > 100 ? '...' : ''}</p>
-              <button onClick={() => setPendingHandoff(null)} className="mt-1 text-[9px] text-blue-400/50 hover:text-blue-400">Cancel</button>
-            </div>
-          )}
-
           {/* Spacer */}
           <div className="flex-1" />
 
@@ -442,11 +423,9 @@ export default function PipelinePage() {
                 START
               </button>
             )}
-            {isPipeline && (
-              <button onClick={() => { setPipelineRunning(false); stopPipeline(); }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400">
-                STOP
-              </button>
-            )}
+            <button onClick={() => { setPipelineRunning(false); stopPipeline(); setSendingAgents(new Set()); }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400">
+              STOP
+            </button>
             {isPipeline && state.events.some(e => e.text?.includes('plan.md')) && (
               <button onClick={handleViewPlan} className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white hover:bg-white/10">
                 View Plan
@@ -499,7 +478,8 @@ export default function PipelinePage() {
                 e.type === 'question' ? 'text-violet-300' :
                 e.type === 'issue' || e.type === 'failure' ? 'text-red-300' :
                 e.type === 'tool_call' ? 'italic text-[#555]' :
-                e.type === 'user_msg' ? 'font-semibold text-blue-300' :
+                e.type === 'handoff' ? 'font-semibold text-cyan-400 italic' :
+                    e.type === 'user_msg' ? 'font-semibold text-blue-300' :
                 e.type === 'text' ? 'text-slate-400' : 'text-[#555]'
               }`}>
                 <span className="mr-1.5 text-[9px] text-[#333]">
@@ -563,12 +543,20 @@ export default function PipelinePage() {
                   <div className="text-[10px] text-[#444]">{AGENT_ROLES[id]}</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Handoff button — manual mode only, only if agent has text output */}
+                  {/* Handoff dropdown — manual mode only, only if agent has text output */}
                   {!isPipeline && hasTextEvents && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleHandoff(id); }}
-                      className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
-                    >Hand off →</button>
+                    <select
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => { if (e.target.value) { handleHandoff(id, e.target.value as AgentId); e.target.value = ''; } }}
+                      defaultValue=""
+                      disabled={sendingAgents.size > 0}
+                      className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] text-blue-400 focus:outline-none disabled:opacity-30"
+                    >
+                      <option value="" disabled>Send to →</option>
+                      {(['A', 'B', 'C', 'D'] as AgentId[]).filter(x => x !== id).map(target => (
+                        <option key={target} value={target} className="bg-[#1a1a2a]">→ {AGENT_NAMES[target]}</option>
+                      ))}
+                    </select>
                   )}
                   {events.length > 0 && (
                     <span className="text-[10px] text-[#333]">{events.length} events</span>
@@ -592,7 +580,8 @@ export default function PipelinePage() {
                       e.type === 'question' ? 'text-violet-300' :
                       e.type === 'issue' || e.type === 'failure' ? 'text-red-300' :
                       e.type === 'tool_call' ? 'italic text-[#555]' :
-                      e.type === 'user_msg' ? 'font-semibold text-blue-300' :
+                      e.type === 'handoff' ? 'font-semibold text-cyan-400 italic' :
+                    e.type === 'user_msg' ? 'font-semibold text-blue-300' :
                       e.type === 'text' ? 'text-slate-400' : 'text-[#555]'
                     }`}>
                       <span className="mr-1.5 text-[9px] text-[#333]">
@@ -602,12 +591,6 @@ export default function PipelinePage() {
                     </div>
                   ))}
                 </div>
-                {/* Pending handoff indicator on target panel */}
-                {pendingHandoff && pendingHandoff.from !== id && (
-                  <div className="mt-2 rounded border border-blue-500/20 bg-blue-500/5 px-2 py-1 text-[10px] text-blue-400">
-                    Receiving handoff from Agent {pendingHandoff.from}
-                  </div>
-                )}
               </div>
               {/* Chat input */}
               <div className="flex-shrink-0 border-t border-[#1a1a2a] px-2.5 py-2" onClick={(e) => e.stopPropagation()}>
@@ -654,7 +637,8 @@ export default function PipelinePage() {
                   e.type === 'question' ? 'text-violet-300' :
                   e.type === 'issue' || e.type === 'failure' ? 'text-red-300' :
                   e.type === 'tool_call' ? 'italic text-[#555]' :
-                  e.type === 'user_msg' ? 'font-semibold text-blue-300' :
+                  e.type === 'handoff' ? 'font-semibold text-cyan-400 italic' :
+                    e.type === 'user_msg' ? 'font-semibold text-blue-300' :
                   e.type === 'text' ? 'text-slate-400' : 'text-[#555]'
                 }`}>
                   <span className="mr-2 text-[10px] text-[#444]">
