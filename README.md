@@ -108,7 +108,7 @@ A pixel art office where 5 agents sit at desks. You watch them work in real-time
 - **Current Turn** — Shows which agent turn is active, what it is doing, and whether it looks stalled
 - **5-Panel Grid** — S (supervisor) panel on the left, A/B/C/D on the right. Each panel shows that agent's activity with auto-scroll. Click any panel to expand.
 - **Per-Panel Chat** — Each panel has its own input. Talk directly to any agent.
-- **Controls** — `Full Build` / `Plan Only`, `START`, `STOP AFTER REVIEW`, `CONTINUE BUILD`, `RESUME STALLED RUN`, `STOP`, `Reset`, `View Plan`
+- **Controls** — `Full Build` / `Plan Only`, `START`, `STOP AFTER REVIEW`, `CONTINUE BUILD`, `RESUME STALLED RUN`, `STOP`, `Reset`, `View Plan`. These now act as fallback controls; you can also ask S to do the same things in chat.
 - **Art style** — The office scene uses a mix of original pixel sprites and CSS-drawn props
 
 When idle, agents wander the office, visit the hookah lounge, and play ping pong.
@@ -145,14 +145,14 @@ The Dev Squad has two modes, toggled in the dashboard:
 
 The autonomous build pipeline. You describe what you want, and 5 agents build it with minimal involvement from you. In strict mode, the UI can still ask you to approve C/D Bash commands.
 
-1. **Reset** — Clear any previous session
-2. **Talk to the Planner** — Type your concept in Agent A's panel. A asks clarifying questions until the scope is clear.
-3. **Choose a Goal** — Pick **Full Build** to run the whole team or **Plan Only** to stop cleanly after B approves the plan.
-4. **Start the Pipeline** — Click **START**. The orchestrator runs A→B→C→D according to the selected goal.
-5. **Optionally Pause After Review** — During planning or plan review, click **STOP AFTER REVIEW** if you want the run to pause after B approves the plan instead of continuing straight into coding.
+1. **Reset if Needed** — Clear any previous session.
+2. **Talk to S or A** — The preferred path is to tell S what you want and let S manage the team. Direct A chat still works when you want to hash out the concept yourself.
+3. **Choose a Goal** — Pick **Full Build** to run the whole team or **Plan Only** to stop cleanly after B approves the plan. The selected goal also acts as the default when you ask S to start from chat.
+4. **Start from Chat or Button** — Tell S to start planning or start the build. The old **START** button still works as a fallback control.
+5. **Pause from Chat or Button** — During planning or plan review, ask S to stop after review, or click **STOP AFTER REVIEW** if you want the run to pause after B approves the plan instead of continuing into coding.
 6. **Watch** — Each panel auto-scrolls as events come in. Click any panel to expand. The dashboard shows phase progress.
-7. **Continue or Recover** — If the run pauses after plan review, click **CONTINUE BUILD** to send the approved plan on to C. If A or B stalls during planning/review, click **RESUME STALLED RUN** to continue from the saved Claude session instead of resetting the run.
-8. **Stop** — Click **STOP** at any time to abort.
+7. **Continue or Recover** — If the run pauses after plan review, ask S to continue the build or use **CONTINUE BUILD**. If A or B stalls during planning/review, ask S to resume the stalled run or use **RESUME STALLED RUN**.
+8. **Stop** — Ask S to stop the run, or click **STOP** at any time.
 9. **View Plan** — Once A writes the plan, click **View Plan** to read it.
 10. **Done** — Your project is in `~/Builds/<project-name>/`.
 
@@ -195,7 +195,7 @@ Once the build is complete, you can chat directly with any agent for post-build 
 
 ### The Supervisor (S Panel)
 
-The S panel on the left is the beginning of the "Claude with a dev team" model. Today, S is not yet the full control plane, but S is already your supervisor and recovery partner. In pipeline mode, S now gets a live team snapshot every time you chat with it: current phase, pipeline status, active turn, recent events, pending approvals, and recommended next actions. If something breaks, stalls, loops, or looks suspicious, ask S what is happening. S can read the event log, the plan, the code, and help you decide whether to wait, stop, pause after review, continue from an approved plan, or resume a stalled planner/reviewer turn.
+The S panel on the left is the beginning of the "Claude with a dev team" model. In pipeline mode, S now gets a live team snapshot every time you chat with it: current phase, pipeline status, active turn, recent events, pending approvals, and recommended next actions. S can also trigger the core supervisor controls directly from chat: start a run, start plan-only mode, stop after review, continue an approved plan, resume a stalled planning/review turn, or stop the run. If something breaks, stalls, loops, or looks suspicious, ask S what is happening or tell S what you want the team to do next.
 
 ### Controls Reference
 
@@ -204,7 +204,7 @@ The S panel on the left is the beginning of the "Claude with a dev team" model. 
 | **PIPELINE / MANUAL** | Both | Toggle between autonomous pipeline and manual orchestration |
 | **Model Picker** | Manual | Choose Claude model (Opus or Sonnet) |
 | **Full Build / Plan Only** | Pipeline | Chooses whether the supervisor should run the whole team or stop after approved plan review |
-| **START** | Pipeline | Creates project directory, spawns orchestrator, and begins the selected supervisor goal |
+| **START** | Pipeline | Fallback button that creates the project directory, spawns the orchestrator, and begins the selected supervisor goal |
 | **STOP AFTER REVIEW** | Pipeline | Arms a clean pause once B approves the plan |
 | **KEEP RUNNING AFTER REVIEW** | Pipeline | Clears the stop-after-review request and lets the run continue into coding |
 | **CONTINUE BUILD** | Pipeline | Resumes a paused plan-only / stopped-after-review run from the approved plan |

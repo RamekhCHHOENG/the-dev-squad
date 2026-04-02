@@ -7,6 +7,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { EMPTY_RUNTIME } from '@/lib/pipeline-runtime';
 import { readPendingApproval } from '@/lib/pipeline-approval';
 import { buildSupervisorSnapshot } from '@/lib/pipeline-supervisor';
+import {
+  appendPipelineEvent,
+  resumePipelineRun,
+  setStopAfterReview,
+  startPipelineRun,
+  stopPipelineRun,
+  type RunGoal,
+  type SecurityMode,
+} from '@/lib/pipeline-control';
+import { parseSupervisorIntent } from '@/lib/supervisor-intents';
 
 const BUILDUI_DIR = resolve(process.cwd(), 'pipeline');
 const BUILDS_DIR = join(homedir(), 'Builds');
@@ -87,6 +97,22 @@ function findLatestProject(): string | null {
       .sort((a: string, b: string) => statSync(join(b, 'pipeline-events.json')).mtimeMs - statSync(join(a, 'pipeline-events.json')).mtimeMs);
     return dirs[0] || null;
   } catch { return null; }
+}
+
+function writeState(file: string, state: Record<string, unknown>) {
+  writeFileSync(file, JSON.stringify(state, null, 2));
+}
+
+function appendUserEvent(state: Record<string, unknown>, agent: string, message: string) {
+  const events = (state.events as Array<Record<string, unknown>>) || [];
+  events.push({
+    time: new Date().toISOString(),
+    agent,
+    phase: state.currentPhase || 'concept',
+    type: 'user_msg',
+    text: `You: ${message}`,
+  });
+  state.events = events;
 }
 
 // ── Shared: stream claude output into a state file ──────────────────
@@ -243,7 +269,11 @@ function handleManual(agent: string, message: string, model: string) {
 
 // ── Pipeline mode ───────────────────────────────────────────────────
 
-function handlePipeline(agent: string, message: string) {
+function handlePipeline(
+  agent: string,
+  message: string,
+  defaults?: { securityMode?: SecurityMode; runGoal?: RunGoal }
+) {
   let projectDir: string;
   let eventsFile: string;
 
@@ -278,9 +308,118 @@ function handlePipeline(agent: string, message: string) {
   const sessions = (state.sessions as Record<string, string>) || {};
   const sessionId = sessions[agent] || '';
 
+  if (agent === 'S') {
+    const intent = parseSupervisorIntent(message);
+    if (intent) {
+      let controlProjectDir = projectDir;
+      let controlEventsFile = eventsFile;
+      let controlState = state;
+
+      if (intent.action === 'start-run') {
+        controlProjectDir = STAGING_DIR;
+        controlEventsFile = join(STAGING_DIR, 'pipeline-events.json');
+        controlState = getStagingState();
+
+        if (!controlState.concept && typeof intent.concept === 'string' && intent.concept.trim()) {
+          controlState.concept = intent.concept.trim();
+        }
+      }
+
+      appendUserEvent(controlState, agent, message);
+      writeState(controlEventsFile, controlState);
+
+      if (intent.action === 'start-run') {
+        const effectiveSecurityMode = intent.securityMode || defaults?.securityMode || (controlState.securityMode === 'strict' ? 'strict' : 'fast');
+        const effectiveRunGoal = intent.runGoal || defaults?.runGoal || 'full-build';
+        const result = startPipelineRun({
+          securityMode: effectiveSecurityMode,
+          runGoal: effectiveRunGoal,
+        });
+
+        if (!result.success) {
+          appendPipelineEvent(controlProjectDir, {
+            agent: 'S',
+            phase: String(controlState.currentPhase || 'concept'),
+            type: 'failure',
+            text: result.error || 'Supervisor could not start the run',
+          });
+          return NextResponse.json({ success: false, error: result.error || 'Could not start pipeline' });
+        }
+
+        appendPipelineEvent(result.projectDir!, {
+          agent: 'S',
+          phase: 'concept',
+          type: 'status',
+          text:
+            result.runGoal === 'plan-only'
+              ? `Supervisor started plan-only mode in ${result.securityMode} mode. A will plan, B will review, then the run will pause.`
+              : `Supervisor started the full build in ${result.securityMode} mode.`,
+        });
+
+        return NextResponse.json({
+          success: true,
+          controlAction: 'start-run',
+          projectDir: result.projectDir,
+          runGoal: result.runGoal,
+          securityMode: result.securityMode,
+        });
+      }
+
+      if (intent.action === 'set-stop-after-review') {
+        const result = setStopAfterReview(intent.enabled, controlProjectDir === STAGING_DIR ? undefined : controlProjectDir);
+        if (!result.success) {
+          appendPipelineEvent(controlProjectDir, {
+            agent: 'S',
+            phase: String(controlState.currentPhase || 'concept'),
+            type: 'failure',
+            text: result.error || 'Supervisor could not update stop-after-review',
+          });
+          return NextResponse.json({ success: false, error: result.error || 'Could not update supervisor control' });
+        }
+
+        return NextResponse.json({
+          success: true,
+          controlAction: 'set-stop-after-review',
+          stopAfterPhase: result.stopAfterPhase,
+          projectDir: result.projectDir,
+        });
+      }
+
+      if (intent.action === 'resume-run') {
+        const result = resumePipelineRun(controlProjectDir === STAGING_DIR ? undefined : controlProjectDir);
+        if (!result.success) {
+          appendPipelineEvent(controlProjectDir, {
+            agent: 'S',
+            phase: String(controlState.currentPhase || 'concept'),
+            type: 'failure',
+            text: result.error || 'Supervisor could not resume the run',
+          });
+          return NextResponse.json({ success: false, error: result.error || 'Could not resume pipeline' });
+        }
+
+        return NextResponse.json({
+          success: true,
+          controlAction: result.action || 'resume-run',
+          projectDir: result.projectDir,
+        });
+      }
+
+      if (intent.action === 'stop-run') {
+        const result = stopPipelineRun(controlProjectDir === STAGING_DIR ? undefined : controlProjectDir);
+        appendPipelineEvent(result.projectDir || controlProjectDir, {
+          agent: 'S',
+          phase: String(controlState.currentPhase || 'concept'),
+          type: 'status',
+          text: 'Supervisor stopped the run',
+        });
+        return NextResponse.json({ success: true, controlAction: 'stop-run', projectDir: result.projectDir });
+      }
+    }
+  }
+
   if (!state.concept && message) {
     state.concept = message;
-    writeFileSync(eventsFile, JSON.stringify(state, null, 2));
+    writeState(eventsFile, state);
   }
 
   const currentPhase = state.currentPhase as string;
@@ -306,10 +445,8 @@ function handlePipeline(agent: string, message: string) {
     finalMessage = '[The build pipeline has completed. The user is chatting with you directly for post-build work — reviewing, fixing, or modifying the project.]\n\n' + finalMessage;
   }
 
-  const events = (state.events as Array<Record<string, unknown>>) || [];
-  events.push({ time: new Date().toISOString(), agent, phase: state.currentPhase || 'concept', type: 'user_msg', text: `You: ${message}` });
-  state.events = events;
-  writeFileSync(eventsFile, JSON.stringify(state, null, 2));
+  appendUserEvent(state, agent, message);
+  writeState(eventsFile, state);
 
   const args: string[] = [
     '-p', finalMessage,
@@ -334,10 +471,13 @@ function handlePipeline(agent: string, message: string) {
 // ── Route handler ───────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const { agent, message, mode, model } = await req.json();
+  const { agent, message, mode, model, securityMode, runGoal } = await req.json();
 
   if (mode === 'manual') {
     return handleManual(agent, message, model || 'claude-sonnet-4-6');
   }
-  return handlePipeline(agent, message);
+  return handlePipeline(agent, message, {
+    securityMode: securityMode === 'strict' ? 'strict' : 'fast',
+    runGoal: runGoal === 'plan-only' ? 'plan-only' : 'full-build',
+  });
 }

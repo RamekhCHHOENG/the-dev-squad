@@ -85,6 +85,11 @@ interface UsePipelineOptions {
   model: string;
 }
 
+interface SendChatOptions {
+  securityMode?: SecurityMode;
+  runGoal?: RunGoal;
+}
+
 export function usePipelineState({ pollInterval = 400, mode, model }: UsePipelineOptions) {
   const [state, setState] = useState<PipelineState>(EMPTY_STATE);
   const [error, setError] = useState<string | null>(null);
@@ -111,11 +116,18 @@ export function usePipelineState({ pollInterval = 400, mode, model }: UsePipelin
     return () => { active = false; clearInterval(interval); };
   }, [pollInterval, mode]);
 
-  const sendChat = useCallback(async (agent: AgentId, message: string) => {
+  const sendChat = useCallback(async (agent: AgentId, message: string, options?: SendChatOptions) => {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent, message, mode, model }),
+      body: JSON.stringify({
+        agent,
+        message,
+        mode,
+        model,
+        securityMode: options?.securityMode,
+        runGoal: options?.runGoal,
+      }),
     });
     return res.json();
   }, [mode, model]);

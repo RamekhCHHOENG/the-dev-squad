@@ -1,0 +1,284 @@
+import { spawn, execFileSync, execSync } from 'child_process';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { join, resolve } from 'path';
+import { homedir } from 'os';
+
+export const BUILDUI_DIR = resolve(process.cwd(), 'pipeline');
+export const BUILDS_DIR = join(homedir(), 'Builds');
+export const STAGING_DIR = join(BUILDS_DIR, '.staging');
+
+export type SecurityMode = 'fast' | 'strict';
+export type RunGoal = 'full-build' | 'plan-only';
+export type ResumeOutcome = 'continue-approved-plan' | 'resume-stalled-turn';
+
+function readJson(file: string): Record<string, unknown> | null {
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(file: string, data: Record<string, unknown>) {
+  writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+export function findLatestProject(): string | null {
+  try {
+    const dirs = readdirSync(BUILDS_DIR)
+      .filter((name) => name !== '.staging' && name !== '.manual')
+      .map((name) => join(BUILDS_DIR, name))
+      .filter((projectDir) => {
+        try {
+          return statSync(projectDir).isDirectory() && statSync(join(projectDir, 'pipeline-events.json')).isFile();
+        } catch {
+          return false;
+        }
+      })
+      .sort(
+        (a, b) =>
+          statSync(join(b, 'pipeline-events.json')).mtimeMs - statSync(join(a, 'pipeline-events.json')).mtimeMs
+      );
+
+    return dirs[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+export function readPipelineState(projectDir: string): Record<string, unknown> | null {
+  return readJson(join(projectDir, 'pipeline-events.json'));
+}
+
+export function appendPipelineEvent(
+  projectDir: string,
+  event: { time?: string; agent: string; phase: string; type: string; text: string }
+) {
+  const file = join(projectDir, 'pipeline-events.json');
+  const state = readJson(file);
+  if (!state) return;
+  const events = Array.isArray(state.events) ? state.events : [];
+  events.push({
+    time: event.time || new Date().toISOString(),
+    agent: event.agent,
+    phase: event.phase,
+    type: event.type,
+    text: event.text,
+  });
+  state.events = events;
+  writeJson(file, state);
+}
+
+function spawnOrchestrator(projectDir: string, securityMode: SecurityMode, aSession?: string) {
+  const orchestratorPath = join(BUILDUI_DIR, 'orchestrator.ts');
+  const args = ['tsx', orchestratorPath, '--project-dir', projectDir];
+  if (aSession) args.push('--a-session', aSession);
+
+  const child = spawn('npx', args, {
+    cwd: projectDir,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+    env: { ...process.env, PIPELINE_SECURITY_MODE: securityMode },
+  });
+
+  child.stdout?.on('data', (data) => process.stdout.write(data));
+  child.stderr?.on('data', (data) => process.stderr.write(data));
+  child.unref();
+}
+
+export function startPipelineRun(options: {
+  securityMode?: SecurityMode;
+  runGoal?: RunGoal;
+}): { success: boolean; error?: string; projectDir?: string; securityMode?: SecurityMode; runGoal?: RunGoal } {
+  const securityMode = options.securityMode === 'strict' ? 'strict' : 'fast';
+  const runGoal = options.runGoal === 'plan-only' ? 'plan-only' : 'full-build';
+
+  const activeProject = findLatestProject();
+  if (activeProject) {
+    const activeState = readPipelineState(activeProject);
+    const activeStatus = String(activeState?.pipelineStatus || '');
+    if (activeStatus === 'running') {
+      return { success: false, error: 'A pipeline run is already active' };
+    }
+  }
+
+  const stagingEvents = join(STAGING_DIR, 'pipeline-events.json');
+  const stagingState = readJson(stagingEvents);
+  if (!stagingState) {
+    return { success: false, error: 'No staging session found. Talk to S or A first.' };
+  }
+
+  const concept = String(stagingState.concept || '').trim();
+  const sessions = (stagingState.sessions as Record<string, string> | undefined) || {};
+  const aSession = sessions.A || '';
+
+  if (!concept) {
+    return { success: false, error: 'No build concept found yet.' };
+  }
+
+  const projectName = concept
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40) || 'new-build';
+
+  const projectDir = join(BUILDS_DIR, projectName);
+  mkdirSync(projectDir, { recursive: true });
+
+  const templates = ['checklist-template.md', 'build-plan-template.md'];
+  for (const template of templates) {
+    const src = join(BUILDUI_DIR, template);
+    const dst = join(projectDir, template.replace('-template', ''));
+    if (existsSync(src) && !existsSync(dst)) copyFileSync(src, dst);
+  }
+
+  mkdirSync(join(projectDir, '.claude', 'hooks'), { recursive: true });
+  const settingsSrc = join(BUILDUI_DIR, '.claude', 'settings.json');
+  const hookSrc = join(BUILDUI_DIR, '.claude', 'hooks', 'approval-gate.sh');
+  if (existsSync(settingsSrc)) copyFileSync(settingsSrc, join(projectDir, '.claude', 'settings.json'));
+  if (existsSync(hookSrc)) {
+    copyFileSync(hookSrc, join(projectDir, '.claude', 'hooks', 'approval-gate.sh'));
+    try {
+      execFileSync('chmod', ['+x', join(projectDir, '.claude', 'hooks', 'approval-gate.sh')]);
+    } catch {}
+  }
+
+  stagingState.projectDir = projectDir;
+  stagingState.securityMode = securityMode;
+  stagingState.runGoal = runGoal;
+  stagingState.stopAfterPhase = runGoal === 'plan-only' ? 'plan-review' : 'none';
+  stagingState.pipelineStatus = 'running';
+  stagingState.resumeAction = 'none';
+  writeJson(join(projectDir, 'pipeline-events.json'), stagingState);
+
+  try {
+    rmSync(STAGING_DIR, { recursive: true, force: true });
+  } catch {}
+
+  spawnOrchestrator(projectDir, securityMode, aSession || undefined);
+
+  return { success: true, projectDir, securityMode, runGoal };
+}
+
+export function setStopAfterReview(enabled: boolean, projectDir?: string): { success: boolean; error?: string; stopAfterPhase?: string; projectDir?: string } {
+  const resolvedProjectDir = projectDir || findLatestProject();
+  if (!resolvedProjectDir) {
+    return { success: false, error: 'No pipeline project found' };
+  }
+
+  const file = join(resolvedProjectDir, 'pipeline-events.json');
+  const state = readJson(file);
+  if (!state) {
+    return { success: false, error: 'No pipeline state found' };
+  }
+
+  state.stopAfterPhase = enabled ? 'plan-review' : 'none';
+  const events = Array.isArray(state.events) ? state.events : [];
+  events.push({
+    time: new Date().toISOString(),
+    agent: 'S',
+    phase: String(state.currentPhase || 'concept'),
+    type: 'status',
+    text: enabled ? 'Supervisor armed stop-after-review' : 'Supervisor cleared stop-after-review',
+  });
+  state.events = events;
+
+  writeJson(file, state);
+  return { success: true, projectDir: resolvedProjectDir, stopAfterPhase: String(state.stopAfterPhase || 'none') };
+}
+
+export function resumePipelineRun(projectDir?: string): { success: boolean; error?: string; projectDir?: string; action?: ResumeOutcome } {
+  const resolvedProjectDir = projectDir || findLatestProject();
+  if (!resolvedProjectDir) {
+    return { success: false, error: 'No pipeline project found' };
+  }
+
+  const file = join(resolvedProjectDir, 'pipeline-events.json');
+  const state = readJson(file);
+  if (!state) {
+    return { success: false, error: 'No pipeline state found' };
+  }
+
+  const currentPhase = String(state.currentPhase || 'concept');
+  const pipelineStatus = String(state.pipelineStatus || (state.buildComplete ? 'complete' : 'idle'));
+  const activeTurn = (state.runtime as { activeTurn?: { status?: string; agent?: string; phase?: string } } | undefined)?.activeTurn;
+  const isStalled = activeTurn?.status === 'stalled';
+  const canResumeSupportedTurn = isStalled && (
+    (activeTurn?.agent === 'A' && (activeTurn?.phase === 'planning' || activeTurn?.phase === 'plan-review')) ||
+    (activeTurn?.agent === 'B' && activeTurn?.phase === 'plan-review')
+  );
+  const canContinueApprovedPlan = pipelineStatus === 'paused' && currentPhase === 'plan-review';
+
+  if (!canResumeSupportedTurn && !canContinueApprovedPlan) {
+    return { success: false, error: 'This run is not paused after review and does not have a resumable stalled turn' };
+  }
+
+  let action: ResumeOutcome;
+  if (canContinueApprovedPlan) {
+    state.runGoal = 'full-build';
+    state.stopAfterPhase = 'none';
+    state.resumeAction = 'continue-approved-plan';
+    action = 'continue-approved-plan';
+  } else {
+    state.resumeAction = 'resume-stalled-turn';
+    action = 'resume-stalled-turn';
+  }
+
+  const actionText = canContinueApprovedPlan
+    ? 'Supervisor resumed the build from the approved plan'
+    : 'Supervisor requested a manual resume of the stalled turn';
+
+  const events = Array.isArray(state.events) ? state.events : [];
+  events.push({
+    time: new Date().toISOString(),
+    agent: 'S',
+    phase: currentPhase,
+    type: 'status',
+    text: actionText,
+  });
+  state.events = events;
+  writeJson(file, state);
+
+  spawnOrchestrator(resolvedProjectDir, state.securityMode === 'strict' ? 'strict' : 'fast');
+  return { success: true, projectDir: resolvedProjectDir, action };
+}
+
+export function stopPipelineRun(projectDir?: string): { success: boolean; projectDir?: string } {
+  try {
+    execSync('pkill -f "tsx.*orchestrator\\.ts" 2>/dev/null || true', { encoding: 'utf8' });
+    execSync('pkill -f "claude.*--output-format.*stream-json" 2>/dev/null || true', { encoding: 'utf8' });
+  } catch {}
+
+  const resolvedProjectDir = projectDir || findLatestProject() || undefined;
+  if (resolvedProjectDir) {
+    const file = join(resolvedProjectDir, 'pipeline-events.json');
+    const state = readJson(file);
+    if (state) {
+      state.activeAgent = '';
+      state.pipelineStatus = 'paused';
+      if (state.agentStatus && typeof state.agentStatus === 'object') {
+        for (const [agent, status] of Object.entries(state.agentStatus)) {
+          if (status === 'active' || status === 'working') {
+            (state.agentStatus as Record<string, string>)[agent] = 'idle';
+          }
+        }
+      }
+      if (state.runtime && typeof state.runtime === 'object') {
+        (state.runtime as { activeTurn?: unknown }).activeTurn = null;
+      }
+      const events = Array.isArray(state.events) ? state.events : [];
+      events.push({
+        time: new Date().toISOString(),
+        agent: 'system',
+        phase: String(state.currentPhase || 'concept'),
+        type: 'status',
+        text: 'Pipeline stopped by user',
+      });
+      state.events = events;
+      writeJson(file, state);
+    }
+  }
+
+  return { success: true, projectDir: resolvedProjectDir };
+}

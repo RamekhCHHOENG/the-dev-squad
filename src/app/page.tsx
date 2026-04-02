@@ -147,7 +147,10 @@ export default function PipelinePage() {
   async function handleSend() {
     if (sendingAgents.has('S') || !chatInput.trim()) return;
     setSendingAgents(prev => new Set([...prev, 'S']));
-    await sendChat('S', chatInput.trim());
+    await sendChat('S', chatInput.trim(), isPipeline ? {
+      securityMode: selectedSecurityMode,
+      runGoal: selectedRunGoal,
+    } : undefined);
     setChatInput('');
     setSendingAgents(prev => { const n = new Set(prev); n.delete('S'); return n; });
   }
@@ -197,7 +200,10 @@ export default function PipelinePage() {
 
     setSendingAgents(prev => new Set([...prev, id]));
     setSelectedAgent(id);
-    await sendChat(id, msg);
+    await sendChat(id, msg, isPipeline ? {
+      securityMode: selectedSecurityMode,
+      runGoal: selectedRunGoal,
+    } : undefined);
     setPanelInputs(prev => ({ ...prev, [id]: '' }));
     setSendingAgents(prev => { const n = new Set(prev); n.delete(id); return n; });
   }
@@ -207,7 +213,10 @@ export default function PipelinePage() {
     const msg = chatInput.trim();
 
     setSendingAgents(prev => new Set([...prev, expandedAgent]));
-    await sendChat(expandedAgent, msg);
+    await sendChat(expandedAgent, msg, isPipeline ? {
+      securityMode: selectedSecurityMode,
+      runGoal: selectedRunGoal,
+    } : undefined);
     setChatInput('');
     setSendingAgents(prev => { const n = new Set(prev); n.delete(expandedAgent!); return n; });
   }
@@ -219,7 +228,10 @@ export default function PipelinePage() {
     if (text.length > 2000) text = text.slice(0, 2000) + '...(truncated)';
     const msg = `[HANDOFF:${fromAgent}→${toAgent}] ${text}\n\nReview this and continue the work.`;
     setSendingAgents(prev => new Set([...prev, toAgent]));
-    await sendChat(toAgent, msg);
+    await sendChat(toAgent, msg, isPipeline ? {
+      securityMode: selectedSecurityMode,
+      runGoal: selectedRunGoal,
+    } : undefined);
     setSendingAgents(prev => { const n = new Set(prev); n.delete(toAgent); return n; });
   }
 
@@ -555,7 +567,13 @@ export default function PipelinePage() {
           <div className="flex-1" />
 
           {/* Controls */}
-          <div className="flex gap-2">
+          <div>
+            {isPipeline && (
+              <div className="mb-2 text-[10px] uppercase tracking-wider text-slate-500">
+                Ask <span className="font-semibold text-emerald-400">S</span> to start, pause, continue, resume, or stop. Buttons are fallback controls.
+              </div>
+            )}
+            <div className="flex gap-2">
             {isPipeline && !pipelineRunning && !pipelinePaused && (!state.projectDir || state.currentPhase === 'concept' || state.buildComplete) && (
               <button onClick={handleStartPipeline} className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-black transition hover:bg-emerald-400">
                 {selectedRunGoal === 'plan-only' ? 'START PLAN ONLY' : 'START FULL BUILD'}
@@ -590,6 +608,7 @@ export default function PipelinePage() {
             <button onClick={handleReset} className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-400 transition hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20">
               Reset
             </button>
+          </div>
           </div>
         </div>
       </div>

@@ -18,7 +18,7 @@ The product is moving toward "give Claude a dev team":
 - `A`, `B`, `C`, and `D` are the worker specialists
 - the whole team follows the same doctrine: `build-plan-template.md`, `checklist.md`, and the locked `plan.md`
 
-Today, pipeline mode still starts with **A** in Phase 0 and `S` is primarily a recovery/diagnostic surface. The first supervisor controls are now live: saved-session recovery for A/B planning-review turns, `plan-only`, `stop after review`, and `continue build` from an approved plan. The next implementation step is to make `S` the primary operator while keeping control authority in deterministic host/orchestrator code. The concrete build plan for that transition lives in [SUPERVISOR-BUILD-PLAN.md](SUPERVISOR-BUILD-PLAN.md).
+Today, pipeline mode can now start from **S** as well as direct A chat. `S` has the first real control-plane actions: saved-session recovery for A/B planning-review turns, `plan-only`, `stop after review`, `continue build` from an approved plan, and chat-triggered start/stop/resume actions. The next implementation step is to keep moving authority toward `S` while leaving the actual execution path deterministic in host/orchestrator code. The concrete build plan for that transition lives in [SUPERVISOR-BUILD-PLAN.md](SUPERVISOR-BUILD-PLAN.md).
 
 When the user chats with `S` in pipeline mode, the chat route now injects a live team snapshot: current phase, pipeline status, run goal, active turn, recent events, pending approvals, and recommended control actions. That makes `S` much closer to a real team manager instead of a generic diagnostic assistant.
 
@@ -26,10 +26,10 @@ When the user chats with `S` in pipeline mode, the chat route now injects a live
 
 ### Phase 0: Concept
 
-1. The **user** chats with **A** in the viewer. This is the only required human interaction.
-2. **A** asks clarifying questions — what do you want, how should it work, any constraints?
+1. The **user** can chat with **S** or **A** in the viewer. The preferred path is to talk to **S** and let **S** manage the team.
+2. **S** or **A** gathers the concept and constraints.
 3. Chat happens in a staging area (`~/Builds/.staging/`). No project directory created yet.
-4. When the user hits **START**, staging moves to a real project dir and the pipeline runs autonomously by default. In strict mode, the UI can still surface Bash approvals later in the run.
+4. When the user asks **S** to start, or uses the fallback **START** button, staging moves to a real project dir and the pipeline runs according to the selected goal. In strict mode, the UI can still surface Bash approvals later in the run.
 
 ### Phase 1: Planning
 

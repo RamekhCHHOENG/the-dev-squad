@@ -784,22 +784,26 @@ function isPositiveSignal(signal: Record<string, unknown>): boolean {
 }
 
 function buildPhase0Context() {
-  if (!existingASession) return '';
-
   const phase0Events = state.events.filter(
-    (event) => event.agent === 'A' || (event.type === 'user_msg' && event.phase === 'concept')
+    (event) =>
+      event.phase === 'concept' &&
+      (
+        event.type === 'user_msg' ||
+        event.type === 'handoff' ||
+        ((event.agent === 'A' || event.agent === 'S') && event.type === 'text')
+      )
   );
   if (phase0Events.length === 0) return '';
 
-  return 'Here is the Phase 0 conversation with the user about what to build:\n\n' +
-    phase0Events.map((event) => event.text).join('\n') + '\n\n';
+  return 'Here is the Phase 0 concept conversation and supervisor context about what to build:\n\n' +
+    phase0Events.map((event) => `${event.agent}: ${event.text}`).join('\n') + '\n\n';
 }
 
 function buildPlanPrompt() {
   const phase0Context = buildPhase0Context();
 
   return [
-    existingASession
+    phase0Context
       ? phase0Context + 'Based on the conversation above, build the plan now.'
       : `Build concept from the user: ${concept}`,
     '',
