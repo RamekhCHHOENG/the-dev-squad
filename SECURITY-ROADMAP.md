@@ -176,5 +176,7 @@ Build `v0.4` next.
 Current `v0.4` status:
 
 - the sandbox runner foundation and hybrid Docker worker path are in place
+- the Docker isolation architecture is built; we have not given up on it or removed it from the roadmap
 - Claude subscription auth for headless/container Claude Code is still an upstream blocker for fully isolated subscription-backed workers
 - until that path works reliably, sandbox-eligible workers should fall back to host execution instead of hard-failing a run
+- because of that blocker, `Isolated` is not exposed as a public UI mode yet

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, type TextareaHTMLAttributes } from 'react'
 import { Badge } from '@/components/shared/Badge';
 import { LunarOfficeScene } from '@/components/mission/LunarOfficeScene';
 import { canAutoResumeTurn } from '@/lib/pipeline-runtime';
-import { getSupervisorRecommendation, getSupervisorUpdate } from '@/lib/pipeline-supervisor';
+import { getExecutionPathStatus, getSupervisorRecommendation, getSupervisorUpdate } from '@/lib/pipeline-supervisor';
 import { usePipelineState, type AgentId, type AppMode, type PendingApproval, type RunGoal, type SecurityMode } from '@/lib/use-pipeline';
 
 const AGENT_NAMES: Record<AgentId, string> = {
@@ -315,6 +315,7 @@ export default function PipelinePage() {
   const canContinueApprovedPlan = pipelinePaused && phase === 'plan-review' && !!state.events.some((event) => event.text.includes('PLAN APPROVED'));
   const supervisorRecommendation = isPipeline ? getSupervisorRecommendation(state, pendingApproval) : null;
   const supervisorUpdate = isPipeline ? getSupervisorUpdate(state, pendingApproval) : null;
+  const executionPathStatus = isPipeline ? getExecutionPathStatus(state) : null;
 
   return (
     <div className="p-4 space-y-4">
@@ -478,6 +479,11 @@ export default function PipelinePage() {
                 <Badge variant={activeRunGoal === 'plan-only' ? 'purple' : 'neutral'}>
                   {activeRunGoal === 'plan-only' ? 'PLAN ONLY' : 'FULL BUILD'}
                 </Badge>
+                {executionPathStatus && (
+                  <Badge variant={executionPathStatus.variant}>
+                    {executionPathStatus.label}
+                  </Badge>
+                )}
                 {state.stopAfterPhase === 'plan-review' && activeRunGoal === 'full-build' && (
                   <Badge variant="warning">STOP AFTER REVIEW</Badge>
                 )}
@@ -542,6 +548,24 @@ export default function PipelinePage() {
                   <div className="flex justify-between"><span className="text-slate-500">Errors</span><span className={errorCount > 0 ? 'text-red-400' : 'text-[#333]'}>{errorCount}</span></div>
                 </div>
               </div>
+
+              {executionPathStatus && (
+                <div>
+                  <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Execution Path</div>
+                  <div className={`rounded-lg border px-3 py-2 text-[11px] ${
+                    executionPathStatus.variant === 'warning'
+                      ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                      : executionPathStatus.variant === 'purple'
+                      ? 'border-violet-500/30 bg-violet-500/10 text-violet-200'
+                      : executionPathStatus.variant === 'success'
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                      : 'border-white/10 bg-white/5 text-slate-300'
+                  }`}>
+                    <div className="font-semibold">{executionPathStatus.label}</div>
+                    <p className="mt-1 leading-relaxed">{executionPathStatus.detail}</p>
+                  </div>
+                </div>
+              )}
 
               {lastAction && (
                 <div>

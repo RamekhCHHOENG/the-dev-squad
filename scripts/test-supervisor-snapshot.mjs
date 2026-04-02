@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { buildSupervisorSnapshot, getSupervisorUpdate } from '../src/lib/pipeline-supervisor.ts';
+import { buildSupervisorSnapshot, getExecutionPathStatus, getSupervisorUpdate } from '../src/lib/pipeline-supervisor.ts';
 
 const pausedSnapshot = buildSupervisorSnapshot(
   {
@@ -139,5 +139,25 @@ const fallbackUpdate = getSupervisorUpdate(
 assert.equal(fallbackUpdate.title, 'An isolated worker fell back to host');
 assert.match(fallbackUpdate.summary, /subscription auth/i);
 assert.match(fallbackUpdate.ask || '', /graceful fallback/i);
+
+const executionFallback = getExecutionPathStatus({
+  pipelineStatus: 'running',
+  events: [
+    { time: '2026-04-02T00:00:00.000Z', agent: 'system', phase: 'coding', type: 'status', text: 'Isolated coder auth is unavailable. Retrying on the host.' },
+  ],
+});
+
+assert.equal(executionFallback.label, 'HOST FALLBACK');
+assert.match(executionFallback.detail, /Docker architecture is built/i);
+
+const executionIsolated = getExecutionPathStatus({
+  pipelineStatus: 'running',
+  events: [
+    { time: '2026-04-02T00:00:00.000Z', agent: 'system', phase: 'coding', type: 'status', text: 'Running coder in isolated Docker worker.' },
+  ],
+});
+
+assert.equal(executionIsolated.label, 'ISOLATED ALPHA');
+assert.match(executionIsolated.detail, /isolated.*worker/i);
 
 console.log('supervisor snapshot checks passed');

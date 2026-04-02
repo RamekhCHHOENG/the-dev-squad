@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.2-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.9-blue" alt="Version" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
   <img src="https://img.shields.io/badge/claude-opus%204.6-blueviolet" alt="Claude Opus 4.6" />
   <img src="https://img.shields.io/badge/agents-5-orange" alt="5 Agents" />
@@ -126,7 +126,7 @@ When idle, agents wander the office, visit the hookah lounge, and play ping pong
 
 - **Claude Code CLI** — this is the engine. You must have the `claude` command installed and working in your terminal. Install it from [claude.ai/code](https://claude.ai/code).
 - **Active Claude subscription** — Max, Pro, or Team. All 5 agent sessions run on your subscription. No API key needed.
-- **Current `v0.4` sandbox note** — the Docker worker path is built, but if Claude Code subscription auth is unavailable for an isolated worker turn, The Dev Squad now falls back to host execution instead of hard-failing the run.
+- **Current `v0.4` sandbox note** — the Docker worker architecture is built and actively integrated, but it is still alpha. If Claude Code subscription auth is unavailable for an isolated worker turn, The Dev Squad falls back to host execution instead of hard-failing the run. We did not abandon isolation; the remaining blocker is reliable subscription auth inside containers.
 - **Node.js 22+**
 - **pnpm**
 

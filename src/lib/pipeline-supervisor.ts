@@ -48,6 +48,12 @@ export interface SupervisorUpdate {
   severity: 'neutral' | 'info' | 'warning' | 'success';
 }
 
+export interface ExecutionPathStatus {
+  label: string;
+  detail: string;
+  variant: 'success' | 'warning' | 'purple' | 'neutral';
+}
+
 function formatAgentStatuses(agentStatus: Record<string, string> | undefined): string {
   if (!agentStatus) return 'A=idle, B=idle, C=idle, D=idle, S=idle';
   return ['A', 'B', 'C', 'D', 'S']
@@ -196,6 +202,49 @@ export function getSupervisorRecommendation(
   };
 }
 
+export function getExecutionPathStatus(state: PipelineStateLike): ExecutionPathStatus {
+  const recentHostFallback = hasRecentMatchingEvent(
+    state.events,
+    (event) => event.type === 'status' && /retrying on the host/i.test(event.text),
+    24,
+  );
+  const recentIsolatedTurn = hasRecentMatchingEvent(
+    state.events,
+    (event) => event.type === 'status' && /running .*isolated docker worker/i.test(event.text),
+    24,
+  );
+
+  if (recentHostFallback) {
+    return {
+      label: 'HOST FALLBACK',
+      detail: 'The Docker architecture is built, but this run had to retry an isolated worker on the host because Claude subscription auth inside the container was unavailable.',
+      variant: 'warning',
+    };
+  }
+
+  if (recentIsolatedTurn) {
+    return {
+      label: 'ISOLATED ALPHA',
+      detail: 'This run used the isolated Docker worker path for an eligible turn. The isolated architecture is real, but it is still alpha while subscription auth in containers remains unreliable.',
+      variant: 'purple',
+    };
+  }
+
+  if (state.pipelineStatus && state.pipelineStatus !== 'idle') {
+    return {
+      label: 'HOST',
+      detail: 'Current supported runs still execute on the host by default. Fast and Strict are ready today; isolated Docker remains an in-progress alpha path.',
+      variant: 'neutral',
+    };
+  }
+
+  return {
+    label: 'DOCKER ALPHA BUILT',
+    detail: 'The Docker isolation architecture is built. We are not dropping it, but public isolated mode stays hidden until Claude subscription auth is reliable inside containers.',
+    variant: 'neutral',
+  };
+}
+
 export function getSupervisorUpdate(
   state: PipelineStateLike,
   pendingApproval: PendingApproval | null
@@ -334,12 +383,14 @@ export function buildSupervisorSnapshot(
   const activeTurn = state.runtime?.activeTurn;
   const recommendation = getSupervisorRecommendation(state, pendingApproval);
   const update = getSupervisorUpdate(state, pendingApproval);
+  const executionPath = getExecutionPathStatus(state);
 
   return [
     '[LIVE TEAM SNAPSHOT]',
     `Concept: ${state.concept || '(not set yet)'}`,
     `Phase: ${state.currentPhase || 'concept'}`,
     `Pipeline status: ${state.pipelineStatus || 'idle'}`,
+    `Execution path: ${executionPath.label}`,
     `Security mode: ${state.securityMode || 'fast'}`,
     `Run goal: ${state.runGoal || 'full-build'}`,
     `Stop after phase: ${state.stopAfterPhase || 'none'}`,

@@ -177,6 +177,21 @@ function streamClaude(
     const child = runner.spawn(opts);
     const canFallbackToHost = child.backend === 'docker' && runner.supportsHostFallback(opts);
 
+    if (child.backend === 'docker') {
+      try {
+        const s = JSON.parse(readFileSync(eventsFile, 'utf8'));
+        const phase = s.currentPhase || 'concept';
+        s.events.push({
+          time: new Date().toISOString(),
+          agent: 'system',
+          phase,
+          type: 'status',
+          text: `Running ${roleLabel(agent)} in isolated Docker worker.`,
+        });
+        writeFileSync(eventsFile, JSON.stringify(s, null, 2));
+      } catch {}
+    }
+
     const rl = createInterface({ input: child.stdout });
     let newSessionId = sessionId;
     let lastResultText = '';

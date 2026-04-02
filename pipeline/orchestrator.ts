@@ -423,6 +423,10 @@ async function runClaudeTurn(
 
     startActiveTurn(agent, safePrompt, opts.autoResumeCount || 0, opts.resume);
 
+    if (usedDocker) {
+      emit('system', state.currentPhase, 'status', `Running ${agentRoleLabel(agent)} in isolated Docker worker.`);
+    }
+
     let lastResult: Record<string, unknown> | null = null;
     let currentSessionId = opts.resume || '';
     let structured: Record<string, unknown> | null = null;
