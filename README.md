@@ -180,7 +180,7 @@ The S panel on the left is **not** part of the pipeline. S is your diagnostic as
 
 ## Security
 
-Agents are constrained by a `PreToolUse` hook that gates every tool call. The hook prevents accidental lane drift — it is not a security sandbox. See [SECURITY.md](SECURITY.md) for details.
+Agents are constrained by a `PreToolUse` hook that gates every tool call. The hook prevents accidental lane drift — it is not a security sandbox. See [SECURITY.md](SECURITY.md) for the threat model, known limitations, and a matrix showing what is fixable in-hook vs what requires design changes or OS-level isolation.
 
 | Agent | Can Write | Can Run Bash | Can Spawn Agents |
 |-------|-----------|-------------|-----------------|

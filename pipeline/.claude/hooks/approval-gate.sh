@@ -11,9 +11,9 @@
 # OS-level sandboxing (containers, chroot, etc).
 #
 # AGENT S (Supervisor): Read unrestricted. Write/Edit jailed to ~/Builds/. Bash allowed.
-# AGENT A (Planner):    Can only write plan.md inside ~/Builds/. No Bash. No Agent tool.
+# AGENT A (Planner):    Can only write plan.md in current project. No Bash. No Agent tool.
 # AGENT B (Reviewer):   Cannot write anything. No Bash. No Agent tool.
-# AGENT C (Coder):      Can write inside ~/Builds/ except plan.md and .claude/. No Agent tool.
+# AGENT C (Coder):      Can write in current project except plan.md and .claude/. No Agent tool.
 # AGENT D (Tester):     Cannot write anything. No Agent tool.
 #
 # ALL: Write/Edit outside ~/Builds/ blocked. .claude/ paths blocked for all agents.
@@ -121,6 +121,15 @@ case "$TOOL_NAME" in
     if [[ "$FILEPATH" != "$BUILDS_DIR/"* ]]; then
       echo "BLOCKED: Cannot write to $FILEPATH — outside ~/Builds/" >&2
       exit 2
+    fi
+
+    # Jail non-S agents to the current project directory (CWD), not all of ~/Builds/
+    if [ "$AGENT" != "S" ]; then
+      PROJECT_DIR=$(readlink -f "$CWD" 2>/dev/null || echo "$CWD")
+      if [[ "$PROJECT_DIR" == "$BUILDS_DIR/"* ]] && [[ "$FILEPATH" != "$PROJECT_DIR/"* ]]; then
+        echo "BLOCKED: Cannot write to $FILEPATH — outside current project" >&2
+        exit 2
+      fi
     fi
 
     # Block writes to .claude/ for ALL agents (including S)

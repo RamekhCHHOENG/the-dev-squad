@@ -58,7 +58,7 @@
 
 LLMs ignore prompt instructions. An agent told "only write plan.md" will write code files. An agent told "don't modify anything" will edit the plan.
 
-Restrictions are enforced by a `PreToolUse` hook (`pipeline/.claude/hooks/approval-gate.sh`) that prevents agents from accidentally exceeding their role. The hook is a guardrail, not a sandbox — see [SECURITY.md](../SECURITY.md) for the threat model and known limitations. The hook reads the `PIPELINE_AGENT` environment variable and gates every tool call:
+Restrictions are enforced by a `PreToolUse` hook (`pipeline/.claude/hooks/approval-gate.sh`) that prevents agents from accidentally exceeding their role. The hook is a guardrail, not a sandbox — see [SECURITY.md](../SECURITY.md) for the threat model, known limitations, and a matrix of what is fixable in-hook vs what requires design changes or OS-level isolation. The hook reads the `PIPELINE_AGENT` environment variable and gates every tool call:
 
 | Agent | Write | Bash | Agent Tool |
 |-------|-------|------|------------|

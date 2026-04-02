@@ -41,14 +41,32 @@ The hook blocks `ln` commands and resolves symlinks via `readlink -f`, but `read
 **Glob-based `.claude/` bypass (V1 — PARTIALLY MITIGATED)**
 The hook blocks `mv`/`cp`/`rm` with dot-file glob patterns and direct `.claude` references. However, sufficiently creative glob patterns or indirect shell expansion could evade the filters. Moving the hook outside the agent-writable tree would be the correct fix.
 
-**Cross-project writes (P1 — OPEN)**
-Agents are jailed to `~/Builds/` but not to their current project directory. Agent C can write files in sibling build directories. Agent A can write `plan.md` in any project under `~/Builds/`.
+**Cross-project writes (P1 — FIXED)**
+Agents A-D are now jailed to their current project directory (CWD), not all of `~/Builds/`. Agent S retains access to all of `~/Builds/` for diagnostics.
 
 **TOCTOU race conditions**
 The hook resolves file paths at check time. Between the check and the actual tool execution, symlinks could be retargeted. This is a fundamental limitation of check-then-act in a separate process.
 
 **WebSearch exfiltration (ACCEPTED RISK)**
 Agent A has WebSearch access for research. Search queries go to the internet and could leak small amounts of information. This is an accepted tradeoff — A needs web access to research build concepts. All other agents are blocked from WebSearch and WebFetch.
+
+## What Requires What
+
+Docker is one way to get stronger isolation, but it is not the only way. Containers, chroot jails, VMs, macOS App Sandbox, or other OS-enforced isolation can all serve the same role.
+
+| Issue | Fixable in Hook? | Needs Design / Permission Change? | Needs OS Isolation for Strong Guarantee? |
+|-------|------------------|-----------------------------------|------------------------------------------|
+| Cross-project writes under `~/Builds/` | Yes — **FIXED** | No | No |
+| Agent A WebSearch exfiltration | No | Yes — reduce, proxy, or remove web access | No |
+| Indirect execution via `python3 -c`, `eval`, base64, etc. | No | Yes — remove Bash, require approval for all Bash, or replace shell access with allowlisted operations | Yes, if Bash must remain available |
+| Hardlink bypass | Partial mitigation only | Yes — move protected files out of agent-writable trees and reduce shell/file authority | Yes, if you need a reliable guarantee |
+| TOCTOU race between check and tool execution | No | Partial mitigation only | Yes |
+
+In short:
+
+- **Fix in hook:** cross-project writes
+- **Fix by changing permissions/product design:** indirect execution and WebSearch risk
+- **Needs OS-level isolation for a strong guarantee:** hardlinks and TOCTOU, and indirect execution if Bash remains available
 
 ## Current Permission Matrix
 
@@ -63,10 +81,11 @@ Agent A has WebSearch access for research. Search queries go to the internet and
 ## Recommended Hardening (Future)
 
 For stronger isolation:
-1. **Docker containers** — run each agent session in a container with read-only filesystem except the current project directory
-2. **Remove Bash for C/D** — require human approval for all bash commands, not just dangerous ones
-3. **Move `.claude/` outside `~/Builds/`** — put hooks and settings in a location agents can never reach
-4. **Allowlist over blocklist** — instead of blocking bad bash patterns, only allow specific safe commands
+1. **Per-project write jail** — restrict writes to the active project directory, not all of `~/Builds/`
+2. **Docker containers or equivalent OS sandbox** — run each agent session in an isolated environment with only the intended project directory writable
+3. **Remove Bash for C/D** — require human approval for all bash commands, not just dangerous ones
+4. **Move `.claude/` outside `~/Builds/`** — put hooks and settings in a location agents can never reach
+5. **Allowlist over blocklist** — instead of blocking bad bash patterns, only allow specific safe commands
 
 ## Reporting
 
