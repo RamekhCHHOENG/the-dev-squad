@@ -34,3 +34,22 @@
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+
+### 2026-04-17 — Tier 1 fixes applied
+
+**Fix 1 — tsconfig.json exclude pipeline/**  
+`tsconfig.json` already had `"exclude": ["node_modules"]` — just appended `"pipeline"` to the array. The pipeline runs via `tsx`, not Next.js, so excluding it is the right boundary. `next-env.d.ts` is unaffected; it's included explicitly before the glob.
+
+**Fix 2 — PipelineAgentId in pipeline/runner.ts**  
+Type was `'A' | 'B' | 'C' | 'D' | 'S'`. Added `'E' | 'F'`. No re-exports or local redefinitions found in `pipeline/orchestrator.ts` — it imports `PipelineAgentId` from runner directly. Single-file fix.
+
+**Fix 3 — normalizeState() in src/app/api/state/route.ts**  
+The ternary only checked two resume actions. Extended it to a four-way OR: `continue-approved-plan | resume-stalled-turn | resume-from-code-review | resume-from-testing`. No shared utility — normalizer is inline in the route file.
+
+**Fix 4 — Committed ~907 lines of uncommitted work**  
+Branched to `feat/build-memory-ef-agents`. Commit included: build memory system, E/F role files, supervisor intents overhaul, orchestrator E/F routing, pipeline-control expansion, UI polish, plus the 3 tier-1 code fixes above. All 3 test scripts (runtime, supervisor-intents, hook-contract) passed clean before commit.
+
+### 2026-04-17 — Tier 1 Fixes Complete
+
+Applied 3 critical type fixes to unblock next build and E/F agent integration. All changes committed to feat/build-memory-ef-agents. Next: hockney must fix page.tsx regression, then branch is ready for review.
+

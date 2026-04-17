@@ -77,3 +77,41 @@ pnpm test:memory     → node --experimental-strip-types scripts/test-build-memo
 **Noise:** Every `--experimental-strip-types` test emits `MODULE_TYPELESS_PACKAGE_JSON` warning. Adding `"type": "module"` to `package.json` would silence all.
 
 **Decisions recorded:** 5 decisions escalated to `.squad/decisions.md` — approval gate tests needed (P1), hook contract E/F coverage (P1), control module tests (P2), API handler tests (P2), supervisor snapshot coverage (P2).
+
+---
+
+### 2026-04-17 — Regression Verification after Fenster's Tier 1 Fixes (v0.3.17+)
+
+**Branch:** `feat/build-memory-ef-agents`  
+**Commit:** afcfca9 — "feat: build memory, E/F agents, supervisor overhaul (v0.3.17+)"
+
+**All 9 test scripts: ✅ ALL PASS.**
+
+| Script | Status |
+|--------|--------|
+| test-pipeline-runtime.mjs | ✅ PASS |
+| test-supervisor-intents.mjs | ✅ PASS |
+| test-hook-contract.mjs | ✅ PASS (25 checks) |
+| test-structured-output-parser.mjs | ✅ PASS |
+| test-pipeline-planning.mjs | ✅ PASS |
+| test-supervisor-snapshot.mjs | ✅ PASS |
+| test-supervisor-concept.mjs | ✅ PASS |
+| test-build-memory.mjs | ✅ PASS (15 checks) |
+| test-runner.mjs | ✅ PASS |
+
+**TypeScript check (`tsc --noEmit`): ❌ 1 NEW REGRESSION + 3 pre-existing errors.**
+
+New regression introduced by Fenster's E/F work:
+- `src/app/page.tsx(351)` — `latestSpeech` prop missing `E` and `F` keys. `AgentId` now includes E/F but the JSX object literal was not updated.
+
+Pre-existing (not regressions, tracked under Decision 5):
+- `pipeline/runner.ts(437)` — Docker stdin null vs Writable mismatch (pulled in transitively)
+- `src/app/api/chat/route.ts(11)` — `.ts` extension import
+- `LunarOfficeScene.tsx(827)` — `"pingpong"` type mismatch
+
+**Action:** Regression filed to `.squad/decisions/inbox/mcmanus-regression-page-tsx-missing-ef.md`. Fenster must add `E: agentSpeech('E'), F: agentSpeech('F')` to line 351 of `page.tsx`.
+
+### 2026-04-17 — Tier 1 Verification (9/9 Tests Pass)
+
+Ran full test suite on feat/build-memory-ef-agents. All 9 test scripts passed cleanly. Identified 1 new regression: page.tsx line 351 missing E/F entries in latestSpeech Record. Pre-existing errors unchanged. Regression assigned to hockney.
+

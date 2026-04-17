@@ -29,3 +29,17 @@
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+
+### 2026-04-17 — E/F agent record map fix
+
+Fixed type regression in `src/app/page.tsx` line 351: the `latestSpeech` prop passed to `<LunarOfficeScene>` was a `Record<AgentId, string | null>` object literal that only included keys `A, B, C, D, S` — missing `E` and `F` after Fenster expanded `AgentId` in `use-pipeline.ts`. Added `E: agentSpeech('E'), F: agentSpeech('F')` to resolve the TS2739 error.
+
+**Agent record map locations:**
+- `src/app/page.tsx:351` — `latestSpeech` inline object literal (the one that needed fixing)
+- `src/lib/use-pipeline.ts:75` — `EMPTY_STATE.agentStatus` (already had E/F)
+- `src/app/squad/page.tsx:11,21` — `AGENT_NAMES` and `AGENT_DESCRIPTIONS` (already had E/F)
+
+### 2026-04-17 — Assigned: Fix page.tsx latestSpeech E/F regression
+
+TypeScript error on page.tsx line 351. latestSpeech Record missing E and F entries. Required fix: add `E: agentSpeech('E'), F: agentSpeech('F')` to the prop object. Once fixed, tsc --noEmit should pass cleanly on feat/build-memory-ef-agents branch. (In progress)
+

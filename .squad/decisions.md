@@ -150,6 +150,71 @@ There is no unified `npm test` command. Tests are scattered across individual sc
 
 ---
 
+### 12. Tier 1 fixes applied to feat/build-memory-ef-agents (Decision)
+
+**Date:** 2026-04-17  
+**Author:** Fenster (Backend/Pipeline Dev)  
+**Status:** Complete  
+
+Three critical fixes unblocking E/F agent expansion:
+
+1. **tsconfig.json** — Excluded `pipeline/` from Next.js type-check (pipeline runs via `tsx`, not build)
+2. **pipeline/runner.ts** — Extended `PipelineAgentId` type to include `'E'|'F'`
+3. **src/app/api/state/route.ts** — Extended `normalizeState()` to recognize `resume-from-code-review` and `resume-from-testing`
+
+All 3 test scripts pass cleanly. One new regression found: `page.tsx` line 351 missing E/F in `latestSpeech` Record (assigned to hockney).
+
+**Architectural Note:** `PipelineAgentId` type defined in runner.ts (low-level) but consumed in orchestrator.ts (high-level). Consider co-locating in shared `pipeline/types.ts` before next agent addition.
+
+---
+
+### 13. page.tsx latestSpeech Record type regression (Decision)
+
+**Date:** 2026-04-17  
+**Author:** McManus (Tester)  
+**Status:** Assigned to hockney-fix-ef-record  
+
+**Severity:** TypeScript error, blocks `tsc --noEmit`
+
+When `AgentId` was extended to include `'E'|'F'`, the `latestSpeech` prop on `LunarOfficeScene` (used in `page.tsx:351`) requires all 7 keys. Missing E and F entries cause type mismatch.
+
+**Fix:** Add `E: agentSpeech('E'), F: agentSpeech('F')` to the latestSpeech prop object.
+
+---
+
+### 14. normalizeState() and resume action tracking (Architectural Note)
+
+**Date:** 2026-04-17  
+**Author:** Fenster  
+**Status:** Complete  
+
+As pipeline resume actions grow (now 4 variants: `continue-approved-plan`, `resume-stalled-turn`, `resume-from-code-review`, `resume-from-testing`), `normalizeState()` will need ongoing maintenance. Currently inline in `src/app/api/state/route.ts`.
+
+**Recommendation:** Move `normalizeState()` and the resume action enum to a shared `src/lib/pipeline-state.ts` before resume action types multiply further.
+
+---
+
+### 15. Hook contract test coverage for agents E/F (P1)
+
+**Date:** 2026-04-17  
+**Author:** McManus (Tester)  
+**Status:** Blocked  
+
+All 25 hook-contract tests pass on agents A–D. Agents E and F have zero regression protection.
+
+**E (Security Auditor) rules:**
+- Can use StructuredOutput (emits approval/issues)
+- Cannot write files or run Bash
+
+**F (DevOps Engineer) rules:**
+- Can write files (generates deployment artifacts)
+- Cannot modify `plan.md`
+- Cannot run Bash
+
+**Action:** Add E/F test cases to `scripts/test-hook-contract.mjs` before shipping E/F expansion.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
