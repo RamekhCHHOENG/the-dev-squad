@@ -770,7 +770,7 @@ export function LunarOfficeScene({
   const idleWanderRef = useRef<number[]>([]);
   useEffect(() => {
     // Send a group of agents to a group spot (hookah or couch)
-    function sendGroup(groupLabel: 'hookah' | 'couch', agents: WorkerId[]) {
+    function sendGroup(groupLabel: 'hookah' | 'couch' | 'pingpong', agents: WorkerId[]) {
       const spots = idleSpots.filter(s => s.label === groupLabel);
       const facing = groupLabel === 'couch' ? 'back' as const : 'front' as const;
 
