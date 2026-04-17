@@ -8,11 +8,11 @@ import {
   isRecoverableDockerAuthFailure,
   type PipelineAgentId,
   type RunnerOptions,
-} from '../../../../pipeline/runner.ts';
+} from '../../../../pipeline/runner';
 import { EMPTY_RUNTIME } from '@/lib/pipeline-runtime';
 import { readPendingApproval } from '@/lib/pipeline-approval';
 import { buildSupervisorSnapshot, getSupervisorRecommendation } from '@/lib/pipeline-supervisor';
-import { buildSupervisorConceptReply, looksLikeStatusQuestion } from '@/lib/supervisor-concept';
+import { buildSupervisorConceptReply } from '@/lib/supervisor-concept';
 import {
   appendPipelineEvent,
   resumePipelineRun,

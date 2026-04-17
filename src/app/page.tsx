@@ -9,27 +9,28 @@ import { LunarOfficeScene } from '@/components/mission/LunarOfficeScene';
 import { canAutoResumeTurn } from '@/lib/pipeline-runtime';
 import { getExecutionPathStatus, getSupervisorRecommendation, getSupervisorUpdate } from '@/lib/pipeline-supervisor';
 import { usePipelineState, type AgentId, type AppMode, type PendingApproval, type PermissionMode, type RunGoal, type SecurityMode } from '@/lib/use-pipeline';
+import { BuildMemoryPanel } from '@/components/shared/BuildMemoryPanel';
 
 const AGENT_NAMES: Record<AgentId, string> = {
-  A: 'Planner', B: 'Reviewer', C: 'Coder', D: 'Tester', S: 'Supervisor',
+  A: 'Planner', B: 'Reviewer', C: 'Coder', D: 'Tester', E: 'Security Auditor', F: 'DevOps', S: 'Supervisor',
 };
 
 const PHASE_LABELS: Record<string, string> = {
   concept: 'Concept', planning: 'Planning', 'plan-review': 'Plan Review',
-  coding: 'Coding', 'code-review': 'Code Review', testing: 'Testing',
-  deploy: 'Deploy', complete: 'Complete',
+  coding: 'Coding', 'code-review': 'Code Review', 'security-audit': 'Security Audit',
+  testing: 'Testing', devops: 'DevOps', deploy: 'Deploy', complete: 'Complete',
 };
 
 const PHASE_VARIANTS: Record<string, 'purple' | 'success' | 'warning' | 'danger' | 'neutral'> = {
   concept: 'neutral', planning: 'purple', 'plan-review': 'purple',
-  coding: 'warning', 'code-review': 'warning', testing: 'danger',
-  deploy: 'success', complete: 'success',
+  coding: 'warning', 'code-review': 'warning', 'security-audit': 'danger',
+  testing: 'danger', devops: 'neutral', deploy: 'success', complete: 'success',
 };
 
 const PHASE_PROGRESS: Record<string, number> = {
   concept: 5, planning: 20, 'plan-review': 35,
-  coding: 55, 'code-review': 70, testing: 85,
-  deploy: 95, complete: 100,
+  coding: 50, 'code-review': 62, 'security-audit': 72,
+  testing: 82, devops: 90, deploy: 96, complete: 100,
 };
 
 const MODEL_OPTIONS = [
@@ -42,6 +43,8 @@ const MANUAL_ROLES: Record<string, string> = {
   B: 'Code review & finding gaps',
   C: 'Writing code',
   D: 'Testing & debugging',
+  E: 'Security auditing & OWASP review',
+  F: 'Infrastructure & DevOps scaffolding',
   S: 'Oversight & diagnostics',
 };
 
@@ -60,17 +63,18 @@ export default function PipelinePage() {
   const [chatInput, setChatInput] = useState('');
   const [sendingAgents, setSendingAgents] = useState<Set<AgentId>>(new Set());
   const [pipelineStarted, setPipelineStarted] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [planContent, setPlanContent] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<AgentId | null>(null);
-  const [panelInputs, setPanelInputs] = useState<Record<string, string>>({ A: '', B: '', C: '', D: '' });
+  const [panelInputs, setPanelInputs] = useState<Record<string, string>>({ A: '', B: '', C: '', D: '', E: '', F: '' });
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const panelRefs = useRef<Record<string, HTMLDivElement | null>>({ A: null, B: null, C: null, D: null, S: null });
+  const panelRefs = useRef<Record<string, HTMLDivElement | null>>({ A: null, B: null, C: null, D: null, E: null, F: null, S: null });
   const modalRef = useRef<HTMLDivElement>(null);
   const feedRef = useRef<HTMLDivElement>(null);
-  const prevCounts = useRef<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, S: 0 });
+  const prevCounts = useRef<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, S: 0 });
   const prevFeedCount = useRef(0);
   const completionNotifiedRef = useRef(false);
 
@@ -82,7 +86,7 @@ export default function PipelinePage() {
 
   // Auto-scroll: all panels, expanded modal, and live feed
   useEffect(() => {
-    for (const id of ['A', 'B', 'C', 'D'] as AgentId[]) {
+    for (const id of ['A', 'B', 'C', 'D', 'E', 'F'] as AgentId[]) {
       const events = agentEvents(id);
       if (events.length > prevCounts.current[id]) {
         const el = panelRefs.current[id];
@@ -134,20 +138,35 @@ export default function PipelinePage() {
   // Poll for pending approvals (pipeline mode only)
   useEffect(() => {
     if (!isPipeline) return;
-    const interval = setInterval(async () => {
+    let timer: ReturnType<typeof setTimeout>;
+    let lastWasNull = true;
+    async function pollPending() {
       try {
         const res = await fetch('/api/pending?_=' + Date.now());
         const data = await res.json();
-        setPendingApproval(data?.tool && data?.approved === null ? data : null);
-      } catch {}
-    }, 500);
-    return () => clearInterval(interval);
+        const next = data?.tool && data?.approved === null ? data : null;
+        if (next !== null || !lastWasNull) {
+          lastWasNull = next === null;
+          setPendingApproval(next);
+        }
+        // Poll fast when there's a pending approval, slow otherwise.
+        timer = setTimeout(pollPending, next !== null ? 500 : 2000);
+      } catch {
+        timer = setTimeout(pollPending, 2000);
+      }
+    }
+    timer = setTimeout(pollPending, 500);
+    return () => clearTimeout(timer);
   }, [isPipeline]);
 
+  // Only tick the clock when there is an active turn — avoids a full re-render every second
+  // when the pipeline is idle, paused, or complete.
+  const hasActiveTurn = Boolean(state.runtime?.activeTurn);
   useEffect(() => {
+    if (!hasActiveTurn) return;
     const interval = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [hasActiveTurn]);
 
   async function handleSend() {
     if (sendingAgents.has('S') || !chatInput.trim()) return;
@@ -163,21 +182,23 @@ export default function PipelinePage() {
 
   async function handleStartPipeline() {
     completionNotifiedRef.current = false;
+    setStartError(null);
     setPipelineStarted(true);
     const res = await startPipeline(selectedSecurityMode, selectedRunGoal, selectedPermissionMode);
     if (!res?.success) {
       setPipelineStarted(false);
-      console.error('Pipeline failed to start:', res?.error || 'Unknown error');
+      setStartError(res?.error || 'Failed to start pipeline');
     }
   }
 
   async function handleResumePipeline() {
     completionNotifiedRef.current = false;
+    setStartError(null);
     setPipelineStarted(true);
     const res = await resumePipeline();
     if (!res?.success) {
       setPipelineStarted(false);
-      console.error('Pipeline failed to resume:', res?.error || 'Unknown error');
+      setStartError(res?.error || 'Failed to resume pipeline');
     }
   }
 
@@ -193,6 +214,7 @@ export default function PipelinePage() {
     }
     await resetState();
     setPipelineStarted(false);
+    setStartError(null);
     completionNotifiedRef.current = false;
     setPendingApproval(null);
     setSelectedAgent('S');
@@ -200,7 +222,7 @@ export default function PipelinePage() {
     setChatInput('');
     setShowPlan(false);
     setPlanContent(null);
-    setPanelInputs({ A: '', B: '', C: '', D: '' });
+    setPanelInputs({ A: '', B: '', C: '', D: '', E: '', F: '' });
   }
 
   async function handlePanelSend(id: AgentId) {
@@ -291,6 +313,12 @@ export default function PipelinePage() {
     canAutoResumeTurn(activeTurn.agent, activeTurn.phase)
   );
   const canContinueApprovedPlan = pipelinePaused && phase === 'plan-review' && !!state.events.some((event) => event.text.includes('PLAN APPROVED'));
+  const canResumeFromCodeReview = (pipelinePaused || state.pipelineStatus === 'running')
+    && (phase === 'coding' || phase === 'code-review')
+    && !!state.sessions?.C;
+  const canResumeFromTesting = (pipelinePaused || state.pipelineStatus === 'failed')
+    && phase === 'testing'
+    && !!state.sessions?.D;
   const supervisorRecommendation = isPipeline ? getSupervisorRecommendation(state, pendingApproval) : null;
   const supervisorUpdate = isPipeline ? getSupervisorUpdate(state, pendingApproval) : null;
   const executionPathStatus = isPipeline ? getExecutionPathStatus(state) : null;
@@ -320,7 +348,7 @@ export default function PipelinePage() {
             <LunarOfficeScene
               activePhase={phase}
               agentStatus={state.agentStatus}
-              latestSpeech={{ A: agentSpeech('A'), B: agentSpeech('B'), C: agentSpeech('C'), D: agentSpeech('D'), S: agentSpeech('S') }}
+              latestSpeech={{ A: agentSpeech('A'), B: agentSpeech('B'), C: agentSpeech('C'), D: agentSpeech('D'), E: agentSpeech('E'), F: agentSpeech('F'), S: agentSpeech('S') }}
               onAgentClick={(agent) => setSelectedAgent(agent)}
             />
           </div>
@@ -350,6 +378,8 @@ export default function PipelinePage() {
                     e.agent === 'B' ? 'text-blue-400' :
                     e.agent === 'C' ? 'text-yellow-400' :
                     e.agent === 'D' ? 'text-red-400' :
+                    e.agent === 'E' ? 'text-orange-400' :
+                    e.agent === 'F' ? 'text-cyan-400' :
                     e.agent === 'S' ? 'text-emerald-400' :
                     'text-slate-600'
                   }`}>{e.agent === 'system' ? '--' : e.agent}</span>
@@ -566,8 +596,8 @@ export default function PipelinePage() {
           {/* Agent Status — both modes */}
           <div>
             <div className="mb-2 text-[10px] uppercase tracking-wider text-slate-500">Agents</div>
-            <div className="grid grid-cols-5 gap-2">
-              {(['A', 'B', 'C', 'D', 'S'] as AgentId[]).map((id) => {
+            <div className="grid grid-cols-7 gap-2">
+              {(['A', 'B', 'C', 'D', 'E', 'F', 'S'] as AgentId[]).map((id) => {
                 const status = state.agentStatus[id] || 'idle';
                 const isActive = status === 'active' || status === 'working';
                 return (
@@ -627,6 +657,8 @@ export default function PipelinePage() {
                       lastAction.agent === 'B' ? 'text-blue-400' :
                       lastAction.agent === 'C' ? 'text-yellow-400' :
                       lastAction.agent === 'D' ? 'text-red-400' :
+                      lastAction.agent === 'E' ? 'text-orange-400' :
+                      lastAction.agent === 'F' ? 'text-cyan-400' :
                       'text-emerald-400'
                     }`}>{lastAction.agent}</span>
                     <span className="text-slate-400">{lastAction.text}</span>
@@ -711,8 +743,16 @@ export default function PipelinePage() {
                 Ask <span className="font-semibold text-emerald-400">S</span> to start, pause, continue, resume, or stop. Buttons are fallback controls, not the main workflow.
               </div>
             )}
+            {startError && (
+              <div className="mb-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-400">
+                <span className="font-bold">Error: </span>{startError}
+                {startError.includes('staging') && (
+                  <span className="block mt-0.5 text-[10px] text-red-300/70">Tell S what you want to build first, then click Start.</span>
+                )}
+              </div>
+            )}
             <div className="flex gap-2">
-            {isPipeline && !pipelineRunning && !pipelinePaused && (!state.projectDir || state.currentPhase === 'concept' || state.buildComplete) && (
+            {isPipeline && !pipelineRunning && !canContinueApprovedPlan && (!state.projectDir || state.currentPhase === 'concept' || state.buildComplete || pipelinePaused) && (
               <button onClick={handleStartPipeline} className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-black transition hover:bg-emerald-400">
                 {selectedRunGoal === 'plan-only' ? 'START PLAN ONLY' : 'START FULL BUILD'}
               </button>
@@ -728,6 +768,16 @@ export default function PipelinePage() {
             {isPipeline && canContinueApprovedPlan && (
               <button onClick={handleResumePipeline} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-500">
                 CONTINUE BUILD
+              </button>
+            )}
+            {isPipeline && canResumeFromCodeReview && (
+              <button onClick={handleResumePipeline} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-black transition hover:bg-amber-400">
+                RESUME → RUN D
+              </button>
+            )}
+            {isPipeline && canResumeFromTesting && (
+              <button onClick={handleResumePipeline} className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-400">
+                RESUME → TESTING
               </button>
             )}
             {isPipeline && canResumeStalledTurn && (
@@ -751,12 +801,15 @@ export default function PipelinePage() {
         </div>
       </div>
 
+      {/* Build Memory — collapsible panel between dashboard and agent grid */}
+      <BuildMemoryPanel />
+
       {/* 5-panel grid: S spans left column, A/B top-right, C/D bottom-right */}
       <div
         className="grid gap-px overflow-hidden rounded-xl border border-white/10 bg-[#1a1a2a]"
         style={{
           gridTemplateColumns: '30% 1fr 1fr',
-          gridTemplateRows: '1fr 1fr',
+          gridTemplateRows: '1fr 1fr 1fr',
           height: '100vh',
         }}
       >
@@ -846,8 +899,8 @@ export default function PipelinePage() {
           </div>
         </div>
 
-        {/* A, B, C, D panels */}
-        {(['A', 'B', 'C', 'D'] as AgentId[]).map((id) => {
+        {/* A, B, C, D, E, F panels */}
+        {(['A', 'B', 'C', 'D', 'E', 'F'] as AgentId[]).map((id) => {
           const events = agentEvents(id);
           const status = state.agentStatus[id] || 'idle';
           const isSelected = selectedAgent === id;
@@ -858,8 +911,10 @@ export default function PipelinePage() {
                 B: 'Direct review chat for plan gaps and tradeoffs',
                 C: 'Direct coding/debugging chat when you want deep context',
                 D: 'Direct testing/review chat for failures and fixes',
+                E: 'Direct security audit chat for OWASP review',
+                F: 'Direct infra/DevOps chat for scaffolding',
               }
-            : { A: MANUAL_ROLES.A, B: MANUAL_ROLES.B, C: MANUAL_ROLES.C, D: MANUAL_ROLES.D };
+            : { A: MANUAL_ROLES.A, B: MANUAL_ROLES.B, C: MANUAL_ROLES.C, D: MANUAL_ROLES.D, E: MANUAL_ROLES.E, F: MANUAL_ROLES.F };
           const hasTextEvents = events.some(e => e.type === 'text');
           return (
             <div
@@ -894,7 +949,7 @@ export default function PipelinePage() {
                       className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] text-blue-400 focus:outline-none disabled:opacity-30"
                     >
                       <option value="" disabled>Send to →</option>
-                      {(['A', 'B', 'C', 'D'] as AgentId[]).filter(x => x !== id).map(target => (
+                      {(['A', 'B', 'C', 'D', 'E', 'F'] as AgentId[]).filter(x => x !== id).map(target => (
                         <option key={target} value={target} className="bg-[#1a1a2a]">→ {AGENT_NAMES[target]}</option>
                       ))}
                     </select>

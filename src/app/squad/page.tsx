@@ -13,6 +13,8 @@ const AGENT_NAMES: Record<AgentId, string> = {
   B: 'Plan Reviewer',
   C: 'Coder',
   D: 'Tester',
+  E: 'Security Auditor',
+  F: 'DevOps Engineer',
   S: 'Supervisor',
 };
 
@@ -22,6 +24,8 @@ const AGENT_DESCRIPTIONS: Record<AgentId, string> = {
   B: 'Challenges the plan until there are no gaps.',
   C: 'Builds the approved plan.',
   D: 'Reviews and tests the implementation.',
+  E: 'Audits code for OWASP vulnerabilities before testing.',
+  F: 'Generates Dockerfile, compose, and CI/CD scaffold.',
 };
 
 const PHASE_LABELS: Record<string, string> = {
@@ -30,7 +34,9 @@ const PHASE_LABELS: Record<string, string> = {
   'plan-review': 'Plan Review',
   coding: 'Coding',
   'code-review': 'Code Review',
+  'security-audit': 'Security Audit',
   testing: 'Testing',
+  devops: 'DevOps',
   deploy: 'Deploy',
   complete: 'Complete',
 };
@@ -66,6 +72,7 @@ export default function SquadPage() {
   const [chatInput, setChatInput] = useState('');
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [sendingAgents, setSendingAgents] = useState<Set<AgentId>>(new Set());
+  const [startError, setStartError] = useState<string | null>(null);
 
   const {
     state,
@@ -81,14 +88,24 @@ export default function SquadPage() {
 
   useEffect(() => {
     if (mode !== 'pipeline') return;
-    const interval = setInterval(async () => {
+    let timer: ReturnType<typeof setTimeout>;
+    let lastWasNull = true;
+    async function pollPending() {
       try {
         const res = await fetch('/api/pending?_=' + Date.now());
         const data = await res.json();
-        setPendingApproval(data?.tool && data?.approved === null ? data : null);
-      } catch {}
-    }, 500);
-    return () => clearInterval(interval);
+        const next = data?.tool && data?.approved === null ? data : null;
+        if (next !== null || !lastWasNull) {
+          lastWasNull = next === null;
+          setPendingApproval(next);
+        }
+        timer = setTimeout(pollPending, next !== null ? 500 : 2000);
+      } catch {
+        timer = setTimeout(pollPending, 2000);
+      }
+    }
+    timer = setTimeout(pollPending, 500);
+    return () => clearTimeout(timer);
   }, [mode]);
 
   const isPipeline = mode === 'pipeline';
@@ -101,6 +118,12 @@ export default function SquadPage() {
   const displayedRunGoal = securityModeLocked ? activeRunGoal : selectedRunGoal;
   const stopAfterReviewArmed = state.stopAfterPhase === 'plan-review' || activeRunGoal === 'plan-only';
   const canContinueApprovedPlan = pipelinePaused && state.currentPhase === 'plan-review';
+  const canResumeFromCodeReview = (pipelinePaused || state.pipelineStatus === 'running')
+    && (state.currentPhase === 'coding' || state.currentPhase === 'code-review')
+    && !!state.sessions?.C;
+  const canResumeFromTesting = (pipelinePaused || state.pipelineStatus === 'failed')
+    && state.currentPhase === 'testing'
+    && !!state.sessions?.D;
 
   const visiblePendingApproval = isPipeline ? pendingApproval : null;
   const supervisorRecommendation = isPipeline ? getSupervisorRecommendation(state, visiblePendingApproval) : null;
@@ -141,8 +164,13 @@ export default function SquadPage() {
   }
 
   async function handleStart() {
-    await startPipeline(selectedSecurityMode, selectedRunGoal);
-    setSelectedAgent('S');
+    setStartError(null);
+    const res = await startPipeline(selectedSecurityMode, selectedRunGoal);
+    if (res?.success) {
+      setSelectedAgent('S');
+    } else {
+      setStartError(res?.error || 'Failed to start pipeline');
+    }
   }
 
   async function handleReset() {
@@ -272,7 +300,7 @@ export default function SquadPage() {
               <div>
                 <div className="mb-1.5 text-[9px] uppercase tracking-[0.18em] text-slate-500">Team</div>
                 <div className="space-y-2">
-                  {(['S', 'A', 'B', 'C', 'D'] as AgentId[]).map((agent) => (
+                  {(['S', 'A', 'B', 'C', 'D', 'E', 'F'] as AgentId[]).map((agent) => (
                     <button
                       key={agent}
                       onClick={() => setSelectedAgent(agent)}
@@ -545,7 +573,15 @@ export default function SquadPage() {
                     <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
                       <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Run Controls</div>
                       <div className="mt-3 space-y-2">
-                        {!pipelineRunning && !pipelinePaused && (!state.projectDir || state.currentPhase === 'concept' || state.buildComplete) && (
+                        {startError && (
+                          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-400">
+                            <span className="font-bold">Error: </span>{startError}
+                            {startError.includes('staging') && (
+                              <span className="block mt-0.5 text-[10px] text-red-300/70">Tell S what you want to build first, then click Start.</span>
+                            )}
+                          </div>
+                        )}
+                        {!pipelineRunning && !canContinueApprovedPlan && (!state.projectDir || state.currentPhase === 'concept' || state.buildComplete || pipelinePaused) && (
                           <button onClick={() => void handleStart()} className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-black transition hover:bg-emerald-400">
                             {selectedRunGoal === 'plan-only' ? 'Start Plan Only' : 'Start Full Build'}
                           </button>
@@ -561,6 +597,16 @@ export default function SquadPage() {
                         {canContinueApprovedPlan && (
                           <button onClick={() => void resumePipeline()} className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500">
                             Continue Build
+                          </button>
+                        )}
+                        {canResumeFromCodeReview && (
+                          <button onClick={() => void resumePipeline()} className="w-full rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-black transition hover:bg-amber-400">
+                            Resume → Run D
+                          </button>
+                        )}
+                        {canResumeFromTesting && (
+                          <button onClick={() => void resumePipeline()} className="w-full rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-400">
+                            Resume → Testing
                           </button>
                         )}
                         <button onClick={() => void stopPipeline()} className="w-full rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-400">

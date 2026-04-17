@@ -48,20 +48,28 @@ function getRow(facing: string): number {
   }
 }
 
-export function PixelSprite({ id, name, bodyColor, x, y, isActive, isWalking, isWaiting = false, facing = 'right', carrying = false, speech = null, title }: PixelSpriteProps) {
+export function PixelSprite({ id, name, x, y, isActive, isWalking, facing = 'right', carrying = false, speech = null, title }: PixelSpriteProps) {
   const [frame, setFrame] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (isWalking) {
-      intervalRef.current = setInterval(() => {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFrame(0);
+      const interval = setInterval(() => {
         setFrame(prev => (prev + 1) % COLS);
       }, WALK_FPS);
+      intervalRef.current = interval;
+      return () => {
+        clearInterval(interval);
+        intervalRef.current = null;
+      };
     } else {
-      setFrame(0);
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isWalking]);
 
   const row = getRow(facing);

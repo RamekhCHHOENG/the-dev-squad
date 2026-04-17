@@ -1,12 +1,12 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLayoutEffect, useRef, useState, useEffect, useCallback } from 'react';
+import { useLayoutEffect, useRef, useState, useEffect } from 'react';
 import { PixelSprite } from './PixelSprite';
-import type { Phase, AgentId } from '@/lib/use-pipeline';
+import type { AgentId } from '@/lib/use-pipeline';
 
 
-type WorkerId = 'planner' | 'reviewer' | 'coder' | 'tester' | 'supervisor';
+type WorkerId = 'planner' | 'reviewer' | 'coder' | 'tester' | 'supervisor' | 'security' | 'devops';
 
 interface WorkerDef {
   id: WorkerId;
@@ -27,29 +27,30 @@ interface WorkerPos {
   facing: 'left' | 'right' | 'back';
 }
 
-const WORKER_TO_AGENT: Record<WorkerId, AgentId> = {
-  planner: 'A', reviewer: 'B', coder: 'C', tester: 'D', supervisor: 'S',
-};
-const AGENT_TO_WORKER: Record<AgentId, WorkerId> = {
-  A: 'planner', B: 'reviewer', C: 'coder', D: 'tester', S: 'supervisor',
+const AGENT_TO_WORKER: Partial<Record<AgentId, WorkerId>> = {
+  A: 'planner', B: 'reviewer', C: 'coder', D: 'tester', S: 'supervisor', E: 'security', F: 'devops',
 };
 
 const workers: WorkerDef[] = [
-  { id: 'planner',    agentId: 'A', name: 'Alexis',  title: 'Planner',    color: '#7c3aed', x: 155, y: 370 },
-  { id: 'reviewer',   agentId: 'B', name: 'Brad',    title: 'Reviewer',   color: '#3b82f6', x: 365, y: 370 },
-  { id: 'coder',      agentId: 'C', name: 'Carlos',  title: 'Coder',      color: '#eab308', x: 558, y: 370 },
-  { id: 'tester',     agentId: 'D', name: 'Dana',    title: 'Tester',     color: '#ef4444', x: 775, y: 370 },
-  { id: 'supervisor', agentId: 'S', name: 'Sal',     title: 'Supervisor', color: '#10b981', x: 990, y: 370 },
+  { id: 'planner',    agentId: 'A', name: 'Alexis',  title: 'Planner',    color: '#7c3aed', x: 155,  y: 370 },
+  { id: 'reviewer',   agentId: 'B', name: 'Brad',    title: 'Reviewer',   color: '#3b82f6', x: 365,  y: 370 },
+  { id: 'coder',      agentId: 'C', name: 'Carlos',  title: 'Coder',      color: '#eab308', x: 558,  y: 370 },
+  { id: 'tester',     agentId: 'D', name: 'Dana',    title: 'Tester',     color: '#ef4444', x: 775,  y: 370 },
+  { id: 'supervisor', agentId: 'S', name: 'Sal',     title: 'Supervisor', color: '#10b981', x: 990,  y: 370 },
+  { id: 'security',   agentId: 'E', name: 'Eva',     title: 'Security',   color: '#f97316', x: 1110, y: 450 },
+  { id: 'devops',     agentId: 'F', name: 'Finn',    title: 'DevOps',     color: '#06b6d4', x: 90,   y: 450 },
 ];
 
 // Home positions — each worker always faces the same direction
 // Workers sit BELOW their desks — feet at y:460, heads peek above desk edge
 const homePositions: Record<WorkerId, WorkerPos> = {
-  planner:    { x: 184, y: 345, facing: 'back' },
-  reviewer:   { x: 394, y: 345, facing: 'back' },
-  coder:      { x: 595, y: 345, facing: 'back' },
-  tester:     { x: 805, y: 345, facing: 'back' },
+  planner:    { x: 184,  y: 345, facing: 'back' },
+  reviewer:   { x: 394,  y: 345, facing: 'back' },
+  coder:      { x: 595,  y: 345, facing: 'back' },
+  tester:     { x: 805,  y: 345, facing: 'back' },
   supervisor: { x: 1015, y: 345, facing: 'back' },
+  security:   { x: 1110, y: 430, facing: 'left'  },
+  devops:     { x: 90,   y: 430, facing: 'right' },
 };
 
 // Per-phase position overrides for ACTIVE workers (pipeline movements)
@@ -81,6 +82,13 @@ const phasePositions: Record<string, Partial<Record<WorkerId, WorkerPos>>> = {
     planner: { x: 184, y: 345, facing: 'back' },    // A at desk ready to deploy
     tester:  { x: 210, y: 345, facing: 'left' },     // D walks to A's desk with final code
   },
+  'security-audit': {
+    security: { x: 640, y: 345, facing: 'right' },   // E moves to C's desk area to audit
+    coder:    { x: 595, y: 345, facing: 'back' },     // C stays at desk while E audits
+  },
+  devops: {
+    devops: { x: 90, y: 430, facing: 'right' },      // F works at their station
+  },
   complete: {},
 };
 
@@ -111,74 +119,6 @@ const idleSpots: { x: number; y: number; label: string }[] = [
   { x: 1120, y: 485, label: 'couch' },
 ];
 
-// Gathering spots — where agents cluster for idle conversations
-// Each spot fits up to 5 agents side by side with ~50px spacing
-const gatherSpots = [
-  { cx: 350, y: 420 },  // between desk 1-2
-  { cx: 550, y: 420 },  // center of room
-  { cx: 750, y: 420 },  // between desk 3-4
-  { cx: 100, y: 380 },  // near water cooler
-];
-
-// Pick random idle spots for non-active workers, avoiding overlaps
-function pickIdlePositions(activeWorkerIds: Set<WorkerId>, seed: number): Record<WorkerId, WorkerPos | null> {
-  const result: Record<string, WorkerPos | null> = {};
-  const usedSpots = new Set<number>();
-  const allWorkerIds: WorkerId[] = ['planner', 'reviewer', 'coder', 'tester', 'supervisor'];
-
-  for (const wId of allWorkerIds) {
-    if (activeWorkerIds.has(wId)) {
-      result[wId] = null; // active workers use phasePositions
-      continue;
-    }
-
-    // 40% chance to stay at desk, 60% chance to wander
-    const rng = ((seed * 31 + wId.charCodeAt(0) * 17) % 100);
-    if (rng < 40) {
-      result[wId] = null; // stay at desk
-      continue;
-    }
-
-    // Pick a random unused spot
-    const startIdx = (seed * 7 + wId.charCodeAt(0) * 13) % idleSpots.length;
-    let found = false;
-    for (let attempt = 0; attempt < idleSpots.length; attempt++) {
-      const idx = (startIdx + attempt) % idleSpots.length;
-      if (!usedSpots.has(idx)) {
-        // Check distance from other assigned spots to avoid overlap
-        const spot = idleSpots[idx];
-        let tooClose = false;
-        for (const usedIdx of usedSpots) {
-          const other = idleSpots[usedIdx];
-          if (Math.abs(spot.x - other.x) < 80 && Math.abs(spot.y - other.y) < 60) {
-            tooClose = true;
-            break;
-          }
-        }
-        if (!tooClose) {
-          usedSpots.add(idx);
-          result[wId] = { x: spot.x, y: spot.y, facing: 'right' };
-          found = true;
-          break;
-        }
-      }
-    }
-    if (!found) {
-      result[wId] = null; // no available spot, stay at desk
-    }
-  }
-
-  return result as Record<WorkerId, WorkerPos | null>;
-}
-
-// Which worker is carrying a document in each phase
-// Matches actual orchestrator flow:
-// planning: A writes plan at desk
-// plan-review: A carries plan to B, B reviews, B sends questions back to A, A answers, loop
-// coding: C builds at desk
-// code-review: C carries code to D, D reviews, D sends issues back to C, C fixes, loop
-// testing: D tests at desk, sends failures to C, C fixes, loop
-// deploy: D carries final code to A
 const phaseCarriers: Record<string, WorkerId | null> = {
   concept: null,
   planning: null,
@@ -187,10 +127,10 @@ const phaseCarriers: Record<string, WorkerId | null> = {
   'code-review': 'coder',       // C carries code to D's desk
   testing: null,
   deploy: 'tester',             // D carries final tested code to A's desk
+  'security-audit': null,
+  devops: null,
   complete: null,
 };
-
-const phaseMap: string[] = ['concept', 'planning', 'plan-review', 'coding', 'code-review', 'testing', 'deploy', 'complete'];
 
 const phaseLabels: Record<string, string> = {
   concept: 'Defining the concept',
@@ -198,7 +138,9 @@ const phaseLabels: Record<string, string> = {
   'plan-review': 'Reviewing the plan',
   coding: 'Writing code',
   'code-review': 'Reviewing code changes',
+  'security-audit': 'Security auditing',
   testing: 'Running tests',
+  devops: 'Scaffolding infrastructure',
   deploy: 'Deploying the build',
   complete: 'Build complete',
 };
@@ -296,6 +238,27 @@ const agentSpeechPool: Record<AgentId, Record<string, string[]>> = {
     complete: [
       'All tests passed.',
     ],
+  },
+  E: {
+    'security-audit': [
+      'Checking for injection...',
+      'OWASP Top 10 review.',
+      'Scanning for secrets.',
+      'Verifying auth flows.',
+      'No hardcoded tokens?',
+      'Input validation pass.',
+    ],
+    complete: ['All clean. Ship it.'],
+  },
+  F: {
+    devops: [
+      'Writing Dockerfile...',
+      'Building docker-compose.',
+      'Configuring CI...',
+      'Health checks added.',
+      'Setting up .env.example.',
+    ],
+    complete: ['Infra scaffolded.'],
   },
   S: {
     concept: [
@@ -666,7 +629,7 @@ export function LunarOfficeScene({
 
   const [walkingIds, setWalkingIds] = useState<Set<string>>(new Set());
   const [idlePositions, setIdlePositions] = useState<Record<WorkerId, WorkerPos | null>>({
-    planner: null, reviewer: null, coder: null, tester: null, supervisor: null,
+    planner: null, reviewer: null, coder: null, tester: null, supervisor: null, security: null, devops: null,
   });
   const idlePositionsRef = useRef(idlePositions);
   idlePositionsRef.current = idlePositions;
@@ -683,7 +646,7 @@ export function LunarOfficeScene({
     idleTimerRef.current = [];
 
     // Reset all idle positions — everyone returns home first
-    setIdlePositions({ planner: null, reviewer: null, coder: null, tester: null, supervisor: null });
+    setIdlePositions({ planner: null, reviewer: null, coder: null, tester: null, supervisor: null, security: null, devops: null });
 
     // Mark only pipeline movers as walking
     const overrides = phasePositions[activePhase] || {};
@@ -702,7 +665,7 @@ export function LunarOfficeScene({
 
     // Stagger idle movements — one worker at a time, random delays
     const activeIds = new Set<WorkerId>(Object.keys(overrides) as WorkerId[]);
-    const idleWorkers = (['planner', 'reviewer', 'coder', 'tester', 'supervisor'] as WorkerId[])
+    const idleWorkers = (['planner', 'reviewer', 'coder', 'tester', 'supervisor', 'security', 'devops'] as WorkerId[])
       .filter(id => !activeIds.has(id));
 
     // Shuffle idle workers
@@ -807,7 +770,7 @@ export function LunarOfficeScene({
   const idleWanderRef = useRef<number[]>([]);
   useEffect(() => {
     // Send a group of agents to a group spot (hookah or couch)
-    function sendGroup(groupLabel: 'hookah' | 'couch', agents: WorkerId[]) {
+    function sendGroup(groupLabel: 'hookah' | 'couch' | 'pingpong', agents: WorkerId[]) {
       const spots = idleSpots.filter(s => s.label === groupLabel);
       const facing = groupLabel === 'couch' ? 'back' as const : 'front' as const;
 
@@ -849,7 +812,7 @@ export function LunarOfficeScene({
     function scheduleWander() {
       const delay = 15000 + Math.random() * 10000; // 15-25s
       const timer = window.setTimeout(() => {
-        const allIds: WorkerId[] = ['planner', 'reviewer', 'coder', 'tester', 'supervisor'];
+        const allIds: WorkerId[] = ['planner', 'reviewer', 'coder', 'tester', 'supervisor', 'security', 'devops'];
         // Filter to agents not actually working in the pipeline
         const available = allIds.filter(id => !activeWorkerIdsRef.current.has(id));
         if (available.length === 0) { scheduleWander(); return; }
@@ -945,7 +908,7 @@ export function LunarOfficeScene({
   // Speech only shows after walking stops, randomized per agent per phase
   const [showSpeech, setShowSpeech] = useState(false);
   const [currentSpeech, setCurrentSpeech] = useState<Record<AgentId, string>>({
-    A: '', B: '', C: '', D: '', S: '',
+    A: '', B: '', C: '', D: '', E: '', F: '', S: '',
   });
   useLayoutEffect(() => {
     setShowSpeech(false);
@@ -954,13 +917,14 @@ export function LunarOfficeScene({
       B: getRandomSpeech('B', activePhase),
       C: getRandomSpeech('C', activePhase),
       D: getRandomSpeech('D', activePhase),
+      E: getRandomSpeech('E', activePhase),
+      F: getRandomSpeech('F', activePhase),
       S: getRandomSpeech('S', activePhase),
     });
     const timer = window.setTimeout(() => setShowSpeech(true), 3200);
     return () => window.clearTimeout(timer);
   }, [activePhase]);
 
-  // Determine active workers from agentStatus
   const activeWorkerIds = new Set<WorkerId>();
   for (const [agentId, status] of Object.entries(agentStatus)) {
     if (status === 'active' || status === 'working') {
@@ -968,7 +932,9 @@ export function LunarOfficeScene({
       if (wId) activeWorkerIds.add(wId);
     }
   }
-  const activeWorkerIdsRef = useRef(activeWorkerIds);
+
+  const activeWorkerIdsRef = useRef<Set<WorkerId>>(activeWorkerIds);
+  // eslint-disable-next-line react-hooks/immutability
   activeWorkerIdsRef.current = activeWorkerIds;
 
   // Check if both ping pong spots are occupied
@@ -985,7 +951,7 @@ export function LunarOfficeScene({
   );
 
   const label = phaseLabels[activePhase] || activePhase;
-  const tickerText = `/// PIPELINE FEED /// ${label.toUpperCase()} /// THE DEV SQUAD /// AGENTS: 5 /// BUILD IN PROGRESS /// `;
+  const tickerText = `/// PIPELINE FEED /// ${label.toUpperCase()} /// THE DEV SQUAD /// AGENTS: 7 /// BUILD IN PROGRESS /// `;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#0e0c10] p-1 sm:p-2">

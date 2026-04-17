@@ -1,7 +1,8 @@
 import { spawn, execFileSync, execSync } from 'child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
-import { join, resolve } from 'path';
+import { join, resolve, basename } from 'path';
 import { homedir } from 'os';
+import { saveMemory } from './build-memory';
 
 export const BUILDUI_DIR = resolve(process.cwd(), 'pipeline');
 export const BUILDS_DIR = join(homedir(), 'Builds');
@@ -10,7 +11,7 @@ export const STAGING_DIR = join(BUILDS_DIR, '.staging');
 export type SecurityMode = 'fast' | 'strict';
 export type PermissionMode = 'auto' | 'plan' | 'dangerously-skip-permissions';
 export type RunGoal = 'full-build' | 'plan-only';
-export type ResumeOutcome = 'continue-approved-plan' | 'resume-stalled-turn';
+export type ResumeOutcome = 'continue-approved-plan' | 'resume-stalled-turn' | 'resume-from-code-review' | 'resume-from-testing';
 
 function readJson(file: string): Record<string, unknown> | null {
   if (!existsSync(file)) return null;
@@ -218,8 +219,14 @@ export function resumePipelineRun(projectDir?: string): { success: boolean; erro
     (activeTurn?.agent === 'B' && activeTurn?.phase === 'plan-review')
   );
   const canContinueApprovedPlan = pipelineStatus === 'paused' && currentPhase === 'plan-review';
+  const canResumeFromCodeReview = (pipelineStatus === 'paused' || pipelineStatus === 'running')
+    && (currentPhase === 'coding' || currentPhase === 'code-review')
+    && !!((state.sessions as Record<string, string> | undefined)?.C);
+  const canResumeFromTesting = (pipelineStatus === 'failed' || pipelineStatus === 'paused')
+    && currentPhase === 'testing'
+    && !!((state.sessions as Record<string, string> | undefined)?.D);
 
-  if (!canResumeSupportedTurn && !canContinueApprovedPlan) {
+  if (!canResumeSupportedTurn && !canContinueApprovedPlan && !canResumeFromCodeReview && !canResumeFromTesting) {
     return { success: false, error: 'This run is not paused after review and does not have a resumable stalled turn' };
   }
 
@@ -229,6 +236,16 @@ export function resumePipelineRun(projectDir?: string): { success: boolean; erro
     state.stopAfterPhase = 'none';
     state.resumeAction = 'continue-approved-plan';
     action = 'continue-approved-plan';
+  } else if (canResumeFromCodeReview) {
+    state.runGoal = 'full-build';
+    state.stopAfterPhase = 'none';
+    state.resumeAction = 'resume-from-code-review';
+    action = 'resume-from-code-review';
+  } else if (canResumeFromTesting) {
+    state.runGoal = 'full-build';
+    state.stopAfterPhase = 'none';
+    state.resumeAction = 'resume-from-testing';
+    action = 'resume-from-testing';
   } else {
     state.resumeAction = 'resume-stalled-turn';
     action = 'resume-stalled-turn';
@@ -236,6 +253,10 @@ export function resumePipelineRun(projectDir?: string): { success: boolean; erro
 
   const actionText = canContinueApprovedPlan
     ? 'Supervisor resumed the build from the approved plan'
+    : canResumeFromCodeReview
+    ? 'Supervisor resumed the build — C already coded, skipping straight to D\'s code review'
+    : canResumeFromTesting
+    ? 'Supervisor resumed testing — skipping to D\'s test session directly'
     : 'Supervisor requested a manual resume of the stalled turn';
 
   const events = Array.isArray(state.events) ? state.events : [];
@@ -289,6 +310,28 @@ export function stopPipelineRun(projectDir?: string): { success: boolean; projec
       });
       state.events = events;
       writeJson(file, state);
+
+      // Save a cancelled memory entry so this run appears in history
+      try {
+        const reviewerFindings = events
+          .filter((e: Record<string, unknown>) => e.agent === 'B' && e.phase === 'plan-review' && e.type === 'question')
+          .map((e: Record<string, unknown>) => String(e.text ?? '').replace(/^Q\d+:\s*/i, '').trim())
+          .filter(Boolean);
+        const securityFindings = events
+          .filter((e: Record<string, unknown>) => e.agent === 'E' && e.type === 'issue')
+          .map((e: Record<string, unknown>) => String(e.text ?? '').replace(/^Security issue \d+:\s*/i, '').trim())
+          .filter(Boolean);
+        saveMemory({
+          projectName: basename(resolvedProjectDir),
+          concept: String(state.concept ?? ''),
+          outcome: 'cancelled',
+          reviewerFindings,
+          securityFindings,
+          problematicPackages: [],
+          workingPackages: [],
+          lessons: [`Run cancelled by user in phase "${state.currentPhase ?? 'unknown'}".`],
+        });
+      } catch {}
     }
   }
 
