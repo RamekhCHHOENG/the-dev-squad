@@ -53,3 +53,29 @@ Branched to `feat/build-memory-ef-agents`. Commit included: build memory system,
 
 Applied 3 critical type fixes to unblock next build and E/F agent integration. All changes committed to feat/build-memory-ef-agents. Next: hockney must fix page.tsx regression, then branch is ready for review.
 
+### 2026-04-17 — Tier 2: Unified npm test + GitHub Actions CI
+
+**Test scripts that exist in `scripts/`:**
+- `test-runner.mjs` → `test:runner` (node --experimental-strip-types)
+- `test-hook-contract.mjs` → `test:hook` (plain node, no strip-types needed)
+- `test-structured-output-parser.mjs` → `test:signals`
+- `test-pipeline-runtime.mjs` → `test:runtime`
+- `test-pipeline-planning.mjs` → `test:planning`
+- `test-supervisor-snapshot.mjs` → `test:supervisor`
+- `test-supervisor-concept.mjs` → `test:supervisor-concept`
+- `test-supervisor-intents.mjs` → `test:supervisor-intents`
+- `test-build-memory.mjs` → `test:memory`
+
+**No Jest.** No `jest.config.*`, no `src/__tests__/` directory. All tests are standalone `.mjs` scripts.
+
+**How `npm test` was wired:**
+Added a `"test"` script to `package.json` as a `&&`-chained command: `tsc --noEmit` first (uses main `tsconfig.json` which already excludes `pipeline/`), then calls each `test:*` script sequentially. No new dependencies added — uses existing Node.js `--experimental-strip-types` pattern already in place.
+
+**CI structure (`.github/workflows/ci.yml`):**
+- Triggers: push and pull_request to `main` and `feat/*`
+- Runner: `ubuntu-latest`, Node.js `22.x`
+- Setup: `pnpm/action-setup@v4` + `actions/setup-node@v4` with `cache: 'pnpm'`
+- Install: `pnpm install`
+- Test: `npm test`
+- No secrets, no tokens — clean public CI gate
+

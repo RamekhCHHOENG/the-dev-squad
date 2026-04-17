@@ -15,7 +15,8 @@
     "test:supervisor": "node --experimental-strip-types scripts/test-supervisor-snapshot.mjs",
     "test:supervisor-concept": "node --experimental-strip-types scripts/test-supervisor-concept.mjs",
     "test:supervisor-intents": "node --experimental-strip-types scripts/test-supervisor-intents.mjs",
-    "test:memory": "node --experimental-strip-types scripts/test-build-memory.mjs"
+    "test:memory": "node --experimental-strip-types scripts/test-build-memory.mjs",
+    "test": "tsc --noEmit && npm run test:runner && npm run test:hook && npm run test:signals && npm run test:runtime && npm run test:planning && npm run test:supervisor && npm run test:supervisor-concept && npm run test:supervisor-intents && npm run test:memory"
   },
   "dependencies": {
     "clsx": "^2.1.1",
