@@ -79,3 +79,10 @@ Added a `"test"` script to `package.json` as a `&&`-chained command: `tsc --noEm
 - Test: `npm test`
 - No secrets, no tokens — clean public CI gate
 
+
+### 2026-04-17 — Tier 2: CI gating
+
+- `npm test` chains `tsc --noEmit` + 9 test scripts (`&&`-chained); fail-fast on first error
+- CI triggers on push/PR to `main` and `feat/*`; runs on `ubuntu-latest`, Node.js 22.x, pnpm cached
+- `src/app/api/chat/route.ts` had a `.ts` extension on an import — removed to satisfy tsc
+- `pipeline/runner.ts` `stdin` is intentionally `null` (DockerRunner uses `stdio: 'ignore'`) — safe type assertion applied

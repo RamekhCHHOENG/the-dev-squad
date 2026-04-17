@@ -115,3 +115,9 @@ Pre-existing (not regressions, tracked under Decision 5):
 
 Ran full test suite on feat/build-memory-ef-agents. All 9 test scripts passed cleanly. Identified 1 new regression: page.tsx line 351 missing E/F entries in latestSpeech Record. Pre-existing errors unchanged. Regression assigned to hockney.
 
+
+### 2026-04-17 — Tier 2: npm test verification
+
+- All 9 test scripts now run via `npm test`; `tsc --noEmit` is the gate — must pass before any runtime tests execute
+- Node.js 22.x required for `--experimental-strip-types`; CI pins to 22.x accordingly
+- Pre-existing type errors must be fixed before adding `tsc --noEmit` to `npm test`; they become blocking immediately

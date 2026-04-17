@@ -220,3 +220,13 @@ All 25 hook-contract tests pass on agents A–D. Agents E and F have zero regres
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
+### 16. CI gating (Tier 2, 2026)
+
+**Date:** 2026-04-17  
+**Author:** Fenster (Backend/Pipeline Dev)  
+**Status:** Active  
+
+`npm test` chains `tsc --noEmit` before all 9 test scripts (`&&`-chained, fail-fast). CI runs on `ubuntu-latest`, Node.js 22.x, pnpm cached. Triggers on push/PR to `main` and `feat/*`. Pre-existing type errors must be fixed before adding the `tsc --noEmit` gate — they become blocking immediately.
+
+---

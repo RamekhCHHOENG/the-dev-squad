@@ -43,3 +43,7 @@ Fixed type regression in `src/app/page.tsx` line 351: the `latestSpeech` prop pa
 
 TypeScript error on page.tsx line 351. latestSpeech Record missing E and F entries. Required fix: add `E: agentSpeech('E'), F: agentSpeech('F')` to the prop object. Once fixed, tsc --noEmit should pass cleanly on feat/build-memory-ef-agents branch. (In progress)
 
+
+### 2026-04-17 — Tier 2: sendGroup type fix
+
+- `LunarOfficeScene.tsx` `sendGroup` parameter type was too narrow — `"pingpong"` is a valid group and was always used at runtime, type definition just hadn't been updated. Widened the union to include `"pingpong"`.
