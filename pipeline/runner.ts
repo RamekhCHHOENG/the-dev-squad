@@ -434,7 +434,10 @@ export class DockerRunner implements Runner {
     child.on('close', cleanupBootstrap);
     child.on('error', cleanupBootstrap);
 
-    return withBackend(child, 'docker');
+    // stdin is intentionally 'ignore' (Docker container doesn't need input),
+    // so the child is ChildProcessByStdio<null,...> rather than ChildProcessWithoutNullStreams.
+    // The cast is safe because RunnerChild only uses stdout, stderr, on, and kill.
+    return withBackend(child as unknown as RunnerChild, 'docker');
   }
 
   async cleanup(projectDir: string): Promise<void> {
