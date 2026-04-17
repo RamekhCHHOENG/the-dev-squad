@@ -1,0 +1,25 @@
+{
+  "universe_usage_history": [
+    {
+      "universe": "The Usual Suspects",
+      "used_at": "2026-04-17T04:05:36.400Z",
+      "project": "the-dev-squad"
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "cast-2026-04-17": {
+      "assignment_id": "cast-2026-04-17",
+      "universe": "The Usual Suspects",
+      "created_at": "2026-04-17T04:05:36.400Z",
+      "project": "the-dev-squad",
+      "roster": {
+        "keaton": "Lead",
+        "fenster": "Backend/Pipeline Dev",
+        "hockney": "Frontend Dev",
+        "mcmanus": "Tester",
+        "scribe": "Scribe",
+        "ralph": "Work Monitor"
+      }
+    }
+  }
+}
