@@ -10,7 +10,7 @@ const MANUAL_DIR = join(BUILDS_DIR, '.manual');
 
 const EMPTY_STATE = {
   concept: '', projectDir: '', currentPhase: 'concept', securityMode: 'fast', runGoal: 'full-build', stopAfterPhase: 'none', pipelineStatus: 'idle', activeAgent: '',
-  agentStatus: { A: 'idle', B: 'idle', C: 'idle', D: 'idle', S: 'idle' },
+  agentStatus: { A: 'idle', B: 'idle', C: 'idle', D: 'idle', E: 'idle', F: 'idle', S: 'idle' },
   sessions: {}, buildComplete: false,
   usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCostUsd: 0 },
   runtime: { ...EMPTY_RUNTIME },
@@ -24,7 +24,7 @@ function normalizeState(data: Record<string, unknown>) {
     securityMode: data.securityMode === 'strict' ? 'strict' : 'fast',
     runGoal: data.runGoal === 'plan-only' ? 'plan-only' : 'full-build',
     stopAfterPhase: data.stopAfterPhase === 'plan-review' ? 'plan-review' : 'none',
-    resumeAction: data.resumeAction === 'continue-approved-plan' || data.resumeAction === 'resume-stalled-turn'
+    resumeAction: data.resumeAction === 'continue-approved-plan' || data.resumeAction === 'resume-stalled-turn' || data.resumeAction === 'resume-from-code-review' || data.resumeAction === 'resume-from-testing'
       ? data.resumeAction
       : 'none',
     pipelineStatus: typeof data.pipelineStatus === 'string'
@@ -51,8 +51,33 @@ function findLatestProject(): string | null {
   } catch { return null; }
 }
 
+/** Slice events for the response. `since` = cursor (client's known total count).
+ *  No cursor → return last INITIAL_EVENT_LIMIT events so the first load is fast.
+ *  With cursor → return only events added since that cursor. */
+const INITIAL_EVENT_LIMIT = 300;
+
+function sliceEvents(
+  normalized: ReturnType<typeof normalizeState>,
+  since: number | null,
+): ReturnType<typeof normalizeState> & { totalEvents: number } {
+  const all = normalized.events;
+  const totalEvents = all.length;
+  const events =
+    since !== null && since >= 0 && since <= totalEvents
+      ? all.slice(since)
+      : all.slice(-INITIAL_EVENT_LIMIT);
+  return { ...normalized, events, totalEvents };
+}
+
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') || 'pipeline';
+  const sinceParam = req.nextUrl.searchParams.get('since');
+  const since = sinceParam !== null ? parseInt(sinceParam, 10) : null;
+
+  /** Sentinel returned when the file can't be read (partial write / race).  
+   *  Client keeps its current accumulated state unchanged. */
+  const NO_CHANGE = (knownSince: number | null) =>
+    NextResponse.json({ noChange: true, totalEvents: knownSince ?? 0 });
 
   // Manual mode — read from .manual directory
   if (mode === 'manual') {
@@ -60,10 +85,12 @@ export async function GET(req: NextRequest) {
     if (existsSync(manualEvents)) {
       try {
         const data = JSON.parse(readFileSync(manualEvents, 'utf8'));
-        return NextResponse.json(normalizeState(data));
-      } catch {}
+        return NextResponse.json(sliceEvents(normalizeState(data), since));
+      } catch {
+        return NO_CHANGE(since);
+      }
     }
-    return NextResponse.json(EMPTY_STATE);
+    return NextResponse.json({ ...EMPTY_STATE, totalEvents: 0 });
   }
 
   // Pipeline mode — check staging first, then real projects
@@ -71,13 +98,15 @@ export async function GET(req: NextRequest) {
   if (existsSync(stagingEvents)) {
     try {
       const data = JSON.parse(readFileSync(stagingEvents, 'utf8'));
-      return NextResponse.json(normalizeState(data));
-    } catch {}
+      return NextResponse.json(sliceEvents(normalizeState(data), since));
+    } catch {
+      return NO_CHANGE(since);
+    }
   }
 
   const projectDir = findLatestProject();
   if (!projectDir) {
-    return NextResponse.json(EMPTY_STATE);
+    return NextResponse.json({ ...EMPTY_STATE, totalEvents: 0 });
   }
 
   try {
@@ -91,10 +120,11 @@ export async function GET(req: NextRequest) {
       pipelineStatus === 'complete' ||
       !!data.buildComplete;
     if (isVisible) {
-      return NextResponse.json(data);
+      return NextResponse.json(sliceEvents(data, since));
     }
-    return NextResponse.json(EMPTY_STATE);
+    return NextResponse.json({ ...EMPTY_STATE, totalEvents: 0 });
   } catch {
-    return NextResponse.json(EMPTY_STATE);
+    // File was mid-write — tell the client to keep its current state.
+    return NO_CHANGE(since);
   }
 }

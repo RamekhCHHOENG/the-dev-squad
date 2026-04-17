@@ -53,6 +53,7 @@ import {
   detectPlanningStep,
 } from '../src/lib/pipeline-planning.ts';
 import { createRunner, isRecoverableDockerAuthFailure } from './runner.ts';
+import { buildMemoryContext, saveMemory } from '../src/lib/build-memory.ts';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -63,15 +64,19 @@ const ROLE_A = join(BUILDUI_DIR, 'role-a.md');
 const ROLE_B = join(BUILDUI_DIR, 'role-b.md');
 const ROLE_C = join(BUILDUI_DIR, 'role-c.md');
 const ROLE_D = join(BUILDUI_DIR, 'role-d.md');
+const ROLE_E = join(BUILDUI_DIR, 'role-e.md');
+const ROLE_F = join(BUILDUI_DIR, 'role-f.md');
 
 const MODEL = 'claude-opus-4-6';
 
-// Effort levels per agent — quality gates (B, D) get max reasoning depth
+// Effort levels per agent — quality gates (B, D, E) get max reasoning depth
 const AGENT_EFFORT: Record<string, string> = {
   A: 'high',   // Planner — follows template, high is enough
   B: 'max',    // Reviewer — must find gaps, deep reasoning pays off
   C: 'high',   // Coder — executing approved plan
   D: 'max',    // Tester — must catch bugs, verify correctness
+  E: 'max',    // Security Auditor — must find all vulnerabilities
+  F: 'high',   // DevOps Engineer — scaffolding from approved spec
   S: 'high',   // Supervisor — not currently used
 };
 
@@ -104,7 +109,7 @@ if (projectDirIdx !== -1) {
     if (!existingASession) existingASession = existing.sessions?.A || '';
     if (existing.securityMode === 'strict') securityMode = 'strict';
     // Only treat as a resume if the state has an explicit resume action
-    resumingExistingProject = existing.resumeAction === 'continue-approved-plan' || existing.resumeAction === 'resume-stalled-turn';
+    resumingExistingProject = existing.resumeAction === 'continue-approved-plan' || existing.resumeAction === 'resume-stalled-turn' || existing.resumeAction === 'resume-from-code-review' || existing.resumeAction === 'resume-from-testing';
   } catch {
     concept = 'Build from viewer';
   }
@@ -186,7 +191,7 @@ interface PipelineState {
   runGoal: 'full-build' | 'plan-only';
   stopAfterPhase: 'none' | 'plan-review';
   pipelineStatus: 'idle' | 'running' | 'paused' | 'complete' | 'failed';
-  resumeAction?: 'none' | 'continue-approved-plan' | 'resume-stalled-turn';
+  resumeAction?: 'none' | 'continue-approved-plan' | 'resume-stalled-turn' | 'resume-from-code-review' | 'resume-from-testing';
   activeAgent: string;
   agentStatus: Record<string, string>;
   sessions: Record<string, string>;
@@ -210,9 +215,9 @@ if (resumingExistingProject && existsSync(eventsFile)) {
     runGoal: existing.runGoal === 'plan-only' ? 'plan-only' : 'full-build',
     stopAfterPhase: existing.stopAfterPhase === 'plan-review' ? 'plan-review' : 'none',
     pipelineStatus: existing.pipelineStatus || (existing.buildComplete ? 'complete' : 'idle'),
-    resumeAction: existing.resumeAction === 'continue-approved-plan' || existing.resumeAction === 'resume-stalled-turn' ? existing.resumeAction : 'none',
+    resumeAction: existing.resumeAction === 'continue-approved-plan' || existing.resumeAction === 'resume-stalled-turn' || existing.resumeAction === 'resume-from-code-review' || existing.resumeAction === 'resume-from-testing' ? existing.resumeAction : 'none',
     activeAgent: existing.activeAgent || '',
-    agentStatus: existing.agentStatus || { A: 'idle', B: 'idle', C: 'idle', D: 'idle', S: 'idle' },
+    agentStatus: existing.agentStatus || { A: 'idle', B: 'idle', C: 'idle', D: 'idle', E: 'idle', F: 'idle', S: 'idle' },
     sessions: existing.sessions || {},
     buildComplete: !!existing.buildComplete,
     usage: existing.usage || { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCostUsd: 0 },
@@ -247,7 +252,7 @@ if (resumingExistingProject && existsSync(eventsFile)) {
     pipelineStatus: 'idle',
     resumeAction: 'none',
     activeAgent: '',
-    agentStatus: { A: 'idle', B: 'idle', C: 'idle', D: 'idle', S: 'idle' },
+    agentStatus: { A: 'idle', B: 'idle', C: 'idle', D: 'idle', E: 'idle', F: 'idle', S: 'idle' },
     sessions: existingSessions,
     buildComplete: false,
     usage: existingUsage,
@@ -371,7 +376,7 @@ function clearActiveTurn(agent: AgentId) {
 //   - Agent tool blocked for A/B/C/D
 //
 
-type AgentId = 'A' | 'B' | 'C' | 'D';
+type AgentId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
 // ── Streaming Claude Runner ─────────────────────────────────────────
 
@@ -391,6 +396,10 @@ function agentRoleLabel(agent: AgentId): string {
       return 'coder';
     case 'D':
       return 'tester';
+    case 'E':
+      return 'security auditor';
+    case 'F':
+      return 'devops engineer';
   }
 }
 
@@ -880,6 +889,15 @@ const TEST_SCHEMA = {
   required: ['status'],
 };
 
+const SECURITY_SCHEMA = {
+  type: 'object',
+  properties: {
+    status: { type: 'string', enum: ['approved', 'issues'] },
+    issues: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['status'],
+};
+
 // ── Helper ──────────────────────────────────────────────────────────
 
 function parseSignal(result: string): Record<string, unknown> {
@@ -919,6 +937,44 @@ function isPositiveSignal(signal: Record<string, unknown>): boolean {
   return s === 'approved' || s === 'passed';
 }
 
+/** Extract reviewer findings, security findings, and package names from pipeline events. */
+function extractBuildFindings() {
+  const reviewerFindings: string[] = [];
+  const securityFindings: string[] = [];
+  const problematicPackages: string[] = [];
+  const workingPackages: string[] = [];
+
+  for (const e of state.events) {
+    // Reviewer questions → reviewer findings
+    if (e.agent === 'B' && e.phase === 'plan-review' && e.type === 'question') {
+      const text = e.text.replace(/^Q\d+:\s*/i, '').trim();
+      if (text) reviewerFindings.push(text);
+    }
+    // Security issues
+    if (e.agent === 'E' && e.type === 'issue') {
+      const text = e.text.replace(/^Security issue \d+:\s*/i, '').trim();
+      if (text) securityFindings.push(text);
+    }
+  }
+
+  // Extract package names from problematic event text (security issues, test failures)
+  const badPkgPattern = /\b([\w@][\w\-./]*)\s+(?:causes?|caused|fails?|failed|broken|incompatible|missing|not found|error|vulnerable)/gi;
+  const goodPkgPattern = /\b([\w@][\w\-./]*)\s+(?:works?|worked|stable|passes?|passed|successfully)/gi;
+  const allText = [...securityFindings, ...state.events.filter(e => e.type === 'issue' || e.type === 'fix').map(e => e.text)].join(' ');
+
+  let m: RegExpExecArray | null;
+  while ((m = badPkgPattern.exec(allText)) !== null) {
+    const pkg = m[1];
+    if (pkg.length > 1 && !problematicPackages.includes(pkg)) problematicPackages.push(pkg);
+  }
+  while ((m = goodPkgPattern.exec(allText)) !== null) {
+    const pkg = m[1];
+    if (pkg.length > 1 && !workingPackages.includes(pkg)) workingPackages.push(pkg);
+  }
+
+  return { reviewerFindings, securityFindings, problematicPackages, workingPackages };
+}
+
 function buildPhase0Context() {
   const phase0Events = state.events.filter(
     (event) =>
@@ -955,7 +1011,7 @@ async function runPlanningPhase(aSession: string, options?: { resumeStalled?: bo
       emitSupervisor('planning', 'The planner is finishing the research pass from the saved session.');
     }
 
-    const researchResult = await claude('A', buildPlanningResearchPrompt(phase0Context, concept), {
+    const researchResult = await claude('A', buildPlanningResearchPrompt(phase0Context, concept, buildMemoryContext(concept)), {
       role: ROLE_A,
       resume: options?.resumeStalled ? resumeSession : undefined,
       resumePrompt: buildPlanningResearchResumePrompt(),
@@ -1083,6 +1139,8 @@ async function runPlanReviewPhase(
           'Respond with ONLY a JSON object: {"status": "approved"} or {"status": "questions", "questions": ["..."]}',
         ].join('\n')
       : [
+          buildMemoryContext(concept),
+          buildMemoryContext(concept) ? '' : null,
           `Review the plan at ${join(projectDir, 'plan.md')}`,
           'Read the entire plan. Look for gaps, unverified assumptions, incomplete code, or anything the coder would need to guess at.',
           '',
@@ -1090,7 +1148,7 @@ async function runPlanReviewPhase(
           'Just give your verdict: approved, or list the specific issues.',
           '',
           'Respond with ONLY a JSON object: {"status": "approved"} or {"status": "questions", "questions": ["..."]}',
-        ].join('\n');
+        ].filter((x): x is string => x !== null).join('\n');
   let nextBResume = options?.resumeStalledAgent === 'B'
     ? (state.runtime.activeTurn?.sessionId || bSession)
     : bSession;
@@ -1181,29 +1239,38 @@ async function runPlanReviewPhase(
   return { aSession, bSession, reviewRound, paused: false };
 }
 
-async function runBuildFromCoding(aSession: string): Promise<{ aSession: string; codeReviewRound: number; testRound: number }> {
-  setPhase('coding');
-  setPipelineStatus('running');
-  setAgent('C', 'active');
-  emit('A', 'coding', 'send', 'Sent approved plan to C');
-  emit('C', 'coding', 'receive', 'Received approved plan from A');
-  emit('C', 'coding', 'status', 'Building...');
-  emitSupervisor('coding', 'The coder is implementing the approved plan now. At this point the goal is execution, not re-deciding the design.');
+async function runBuildFromCoding(aSession: string, opts?: { skipCoding?: boolean; cSession?: string; skipToTesting?: boolean; dSession?: string }): Promise<{ aSession: string; codeReviewRound: number; securityRound: number; testRound: number }> {
+  let cSession: string | undefined = opts?.cSession;
+  // dSession is hoisted so skipToTesting can seed it from a saved session.
+  let dSession: string | undefined = opts?.dSession;
 
-  const cResult = await claude('C', [
-    `Read the approved plan at ${join(projectDir, 'plan.md')}`,
-    'Build exactly what it says. Every file, every modification, every special case.',
-    'Do not improvise. Do not interpret. Do not "improve."',
-    'Do not modify plan.md — it is locked.',
-    'Do NOT use the Agent tool. Do NOT spawn sub-agents. Build everything yourself.',
-    '',
-    'When you are done, confirm what you built.',
-  ].join('\n'), { role: ROLE_C });
-  let cSession = cResult.sessionId;
-  saveSession('C', cSession);
+  if (!opts?.skipCoding && !opts?.skipToTesting) {
+    setPhase('coding');
+    setPipelineStatus('running');
+    setAgent('C', 'active');
+    emit('A', 'coding', 'send', 'Sent approved plan to C');
+    emit('C', 'coding', 'receive', 'Received approved plan from A');
+    emit('C', 'coding', 'status', 'Building...');
+    emitSupervisor('coding', 'The coder is implementing the approved plan now. At this point the goal is execution, not re-deciding the design.');
 
-  emit('C', 'coding', 'status', 'Finished coding');
+    const cResult = await claude('C', [
+      `Read the approved plan at ${join(projectDir, 'plan.md')}`,
+      'Build exactly what it says. Every file, every modification, every special case.',
+      'Do not improvise. Do not interpret. Do not "improve."',
+      'Do not modify plan.md — it is locked.',
+      'Do NOT use the Agent tool. Do NOT spawn sub-agents. Build everything yourself.',
+      '',
+      'When you are done, confirm what you built.',
+    ].join('\n'), { role: ROLE_C });
+    cSession = cResult.sessionId;
+    saveSession('C', cSession);
 
+    emit('C', 'coding', 'status', 'Finished coding');
+  }
+
+  let codeReviewRound = 0;
+
+  if (!opts?.skipToTesting) {
   setPhase('code-review');
   setAgent('C', 'idle');
   setAgent('D', 'active');
@@ -1211,9 +1278,7 @@ async function runBuildFromCoding(aSession: string): Promise<{ aSession: string;
   emit('D', 'code-review', 'receive', 'Received code from C');
   emitSupervisor('code-review', 'The tester is reviewing the coder output against the approved plan before we trust the build.');
 
-  let dSession: string | undefined;
   let codeApproved = false;
-  let codeReviewRound = 0;
 
   while (!codeApproved) {
     codeReviewRound += 1;
@@ -1273,10 +1338,94 @@ async function runBuildFromCoding(aSession: string): Promise<{ aSession: string;
       setAgent('C', 'idle');
     }
   }
+  } // end if (!opts?.skipToTesting) — code-review block
+
+  // ── Security Audit ───────────────────────────────────────────────
+  let securityRound = 0;
+  if (!opts?.skipToTesting) {
+  setPhase('security-audit');
+  setAgent('D', 'idle');
+  setAgent('E', 'active');
+  emit('D', 'security-audit', 'send', 'Sent code to E for security audit');
+  emit('E', 'security-audit', 'receive', 'Received codebase from D — starting OWASP audit');
+  emitSupervisor('security-audit', 'Code review passed. The security auditor is scanning for OWASP Top 10 vulnerabilities before the tester runs.');
+
+  let eSession: string | undefined;
+  let securityApproved = false;
+
+  while (!securityApproved) {
+    securityRound += 1;
+
+    const ePrompt = eSession
+      ? [
+          'C has applied security fixes.',
+          `Re-audit the code against the plan at ${join(projectDir, 'plan.md')}`,
+          'Focus on confirmed vulnerabilities only.',
+          '',
+          'Respond with ONLY a JSON object: {"status": "approved"} or {"status": "issues", "issues": ["..."]}',
+        ].join('\n')
+      : [
+          `Read the plan at ${join(projectDir, 'plan.md')}`,
+          'Read all application code C produced.',
+          'Audit for OWASP Top 10: injection (SQL/command/XSS), broken auth, sensitive data exposure, broken access control, security misconfiguration, insecure deserialization, vulnerable components, hardcoded secrets, missing input validation on API boundaries, path traversal, unprotected endpoints.',
+          '',
+          'Respond with ONLY a JSON object: {"status": "approved"} or {"status": "issues", "issues": ["[file/line] vuln type: description and fix"]}',
+        ].join('\n');
+
+    emit('E', 'security-audit', 'status', `Security audit round ${securityRound}...`);
+
+    const eResult = await claude('E', ePrompt, {
+      role: ROLE_E,
+      resume: eSession,
+      jsonSchema: SECURITY_SCHEMA,
+    });
+    eSession = eResult.sessionId;
+    saveSession('E', eSession);
+
+    const secSignal = eResult.structured || parseSignal(eResult.result);
+
+    if (isPositiveSignal(secSignal)) {
+      securityApproved = true;
+      emit('E', 'security-audit', 'approval', 'SECURITY AUDIT PASSED');
+      emitSupervisor('security-audit', 'No security vulnerabilities found. The code is clear to proceed to testing.');
+      setAgent('E', 'done');
+    } else {
+      const secIssues = (secSignal.issues as string[]) || [];
+      secIssues.forEach((issue, index) => {
+        emit('E', 'security-audit', 'issue', `Security issue ${index + 1}: ${issue}`);
+      });
+
+      emit('E', 'security-audit', 'send', `Sent ${secIssues.length} security issue(s) to C`);
+      setAgent('C', 'active');
+      emit('C', 'security-audit', 'receive', `Received ${secIssues.length} security issue(s) from E`);
+
+      const cSecFix = await claude('C', [
+        'Agent E (Security Auditor) found security vulnerabilities in your code:',
+        '',
+        ...secIssues.map((issue, index) => `${index + 1}. ${issue}`),
+        '',
+        'Fix each vulnerability. Do not modify plan.md.',
+      ].join('\n'), { role: ROLE_C, resume: cSession });
+      cSession = cSecFix.sessionId;
+      saveSession('C', cSession);
+
+      emit('C', 'security-audit', 'fix', 'Applied security fixes');
+      emit('C', 'security-audit', 'send', 'Sent fixed code to E');
+      setAgent('C', 'idle');
+    }
+  }
+  } // end if (!opts?.skipToTesting) — security-audit block
 
   setPhase('testing');
-  emit('D', 'testing', 'status', 'Moving to testing...');
-  emitSupervisor('testing', 'Code review is done. The tester is now running the build and checking whether it actually behaves the way the plan says it should.');
+  setAgent('D', 'active');
+  const resumingTesting = !!opts?.skipToTesting;
+  if (resumingTesting) {
+    emit('system', 'testing', 'status', 'Resuming testing — re-running D with saved session');
+    emitSupervisor('testing', 'Resuming from a previous testing failure. D is re-running tests now.');
+  } else {
+    emit('D', 'testing', 'status', 'Moving to testing...');
+    emitSupervisor('testing', 'Security audit passed. The tester is now running the build and checking whether it actually behaves the way the plan says it should.');
+  }
 
   let testsPassed = false;
   let testRound = 0;
@@ -1341,10 +1490,32 @@ async function runBuildFromCoding(aSession: string): Promise<{ aSession: string;
     }
   }
 
+  // ── DevOps Phase ─────────────────────────────────────────────────
+  setPhase('devops');
+  setAgent('D', 'idle');
+  setAgent('F', 'active');
+  emit('D', 'devops', 'send', 'Testing passed — notified F to generate infrastructure');
+  emit('F', 'devops', 'receive', 'Testing confirmed — generating infrastructure scaffold');
+  emitSupervisor('devops', 'Testing passed. The DevOps engineer is now generating the infrastructure scaffold: Dockerfile, docker-compose, .env.example, and CI config.');
+
+  const fResult = await claude('F', [
+    `Read the plan at ${join(projectDir, 'plan.md')}`,
+    'Read the application code to understand the stack, entry point, ports, required services, and environment variables.',
+    'Generate: Dockerfile (multi-stage if applicable), docker-compose.yml with all required services, .env.example with all env vars (placeholder values only, no real credentials), and .github/workflows/ci.yml if no CI config already exists.',
+    'Do not modify any application code or plan.md.',
+    'Use placeholder comments for any ENV values you cannot determine from the code.',
+    'When done, confirm what infrastructure files you generated.',
+  ].join('\n'), { role: ROLE_F });
+  saveSession('F', fResult.sessionId);
+
+  emit('F', 'devops', 'approval', 'DEVOPS COMPLETE');
+  emitSupervisor('devops', 'Infrastructure scaffold is ready. The project now has containerization and CI/CD files alongside the application code.');
+  setAgent('F', 'done');
+
   setPhase('deploy');
   setAgent('A', 'active');
-  emit('D', 'deploy', 'send', 'Sent reviewed + tested code to A');
-  emit('A', 'deploy', 'receive', 'Received final code from D');
+  emit('F', 'deploy', 'send', 'Infrastructure ready — handing off to A for final confirmation');
+  emit('A', 'deploy', 'receive', 'Received final build from the team');
   emit('A', 'deploy', 'status', 'Deploying...');
 
   const aDeployResult = await claude('A', [
@@ -1362,6 +1533,36 @@ async function runBuildFromCoding(aSession: string): Promise<{ aSession: string;
   emit('A', 'deploy', 'approval', 'BUILD COMPLETE');
   emitSupervisor('complete', 'The team finished the build. You can inspect the output now or jump into any specialist chat for follow-up work.');
 
+  // ── Save build memory ──────────────────────────────────────────────────────
+  try {
+    const projectName = basename(projectDir);
+    const runStartEvent = state.events.find((e: PipelineEvent) => e.phase === 'concept' || e.phase === 'planning');
+    const runStartTime = runStartEvent?.time ? new Date(runStartEvent.time).getTime() : Date.now();
+    const durationMinutes = Math.round((Date.now() - runStartTime) / 60000);
+    const findings = extractBuildFindings();
+    const lessons: string[] = [
+      `Build completed in ${durationMinutes} minute(s) with ${codeReviewRound} code review round(s) and ${testRound} test round(s).`,
+    ];
+    if (findings.reviewerFindings.length) {
+      lessons.push(`Reviewer raised ${findings.reviewerFindings.length} issue(s) during plan review.`);
+    }
+    if (findings.securityFindings.length) {
+      lessons.push(`Security audit found ${findings.securityFindings.length} issue(s) which were resolved before completion.`);
+    }
+    saveMemory({
+      projectName,
+      concept,
+      outcome: 'success',
+      ...findings,
+      lessons,
+      durationMinutes,
+    });
+    emit('system', 'complete', 'status', 'Build outcome saved to memory');
+  } catch {
+    // Memory save is non-critical — never fail the pipeline for it
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   try {
     execFileSync('git', ['add', '.'], { cwd: projectDir });
     execFileSync('git', ['commit', '-m', `Build complete: ${concept.slice(0, 50)}`], { cwd: projectDir });
@@ -1377,7 +1578,7 @@ async function runBuildFromCoding(aSession: string): Promise<{ aSession: string;
     }
   } catch {}
 
-  return { aSession, codeReviewRound, testRound };
+  return { aSession, codeReviewRound, securityRound, testRound };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1395,6 +1596,7 @@ async function run() {
   let aSession = existingASession;
   let reviewRound = 0;
   let codeReviewRound = 0;
+  let securityRound = 0;
   let testRound = 0;
 
   if (existingASession && !resumingExistingProject) {
@@ -1472,10 +1674,36 @@ async function run() {
     throw new Error('plan.md is missing; cannot continue the build');
   }
 
-  const build = await runBuildFromCoding(aSession);
-  aSession = build.aSession;
-  codeReviewRound = build.codeReviewRound;
-  testRound = build.testRound;
+  // Resume from code-review: C already built the code, skip straight to D.
+  if (initialResumeAction === 'resume-from-code-review' ||
+    (state.currentPhase === 'coding' && initialPipelineStatus === 'paused' && existsSync(join(projectDir, 'plan.md')))) {
+    emit('system', 'code-review', 'status', 'Resuming from code-review — C already built the code');
+    emitSupervisor('code-review', 'C already finished coding before the run was paused. Skipping coding and handing straight to D for review.');
+    const build = await runBuildFromCoding(aSession, { skipCoding: true, cSession: state.sessions.C || undefined });
+    aSession = build.aSession;
+    codeReviewRound = build.codeReviewRound;
+    securityRound = build.securityRound;
+    testRound = build.testRound;
+  } else if (initialResumeAction === 'resume-from-testing' ||
+    (state.currentPhase === 'testing' && (initialPipelineStatus === 'failed' || initialPipelineStatus === 'paused') && existsSync(join(projectDir, 'plan.md')))) {
+    emit('system', 'testing', 'status', 'Resuming from testing — jumping straight to D');
+    emitSupervisor('testing', 'The previous run failed during testing. Skipping coding, code-review, and security audit — resuming D\'s testing session directly.');
+    const build = await runBuildFromCoding(aSession, {
+      skipToTesting: true,
+      cSession: state.sessions.C || undefined,
+      dSession: state.sessions.D || undefined,
+    });
+    aSession = build.aSession;
+    codeReviewRound = build.codeReviewRound;
+    securityRound = build.securityRound;
+    testRound = build.testRound;
+  } else {
+    const build = await runBuildFromCoding(aSession);
+    aSession = build.aSession;
+    codeReviewRound = build.codeReviewRound;
+    securityRound = build.securityRound;
+    testRound = build.testRound;
+  }
 
   console.log('\n\x1b[1m╔══════════════════════════════════════════╗');
   console.log('║            BUILD COMPLETE                 ║');
@@ -1484,6 +1712,7 @@ async function run() {
   console.log(`  Plan:          ${join(projectDir, 'plan.md')}`);
   console.log(`  Review rounds: ${reviewRound}`);
   console.log(`  Code reviews:  ${codeReviewRound}`);
+  console.log(`  Security:      ${securityRound}`);
   console.log(`  Test rounds:   ${testRound}`);
   console.log('');
 }
@@ -1492,6 +1721,16 @@ run().catch((err) => {
   try {
     setPipelineStatus('failed');
     emitSupervisor(state.currentPhase || 'concept', `The run failed in ${state.currentPhase || 'concept'}. Ask me what happened and I can help decide whether to resume, stop, or reset.`);
+  } catch {}
+  try {
+    const findings = extractBuildFindings();
+    saveMemory({
+      projectName: basename(projectDir) || 'unknown',
+      concept,
+      outcome: 'failed',
+      ...findings,
+      lessons: [`Run failed in phase "${state.currentPhase || 'unknown'}": ${err?.message ?? String(err)}`],
+    });
   } catch {}
   console.error('\n[FATAL]', err.message);
   process.exit(1);

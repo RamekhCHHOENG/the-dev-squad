@@ -12,6 +12,8 @@ You are part of a dev team:
 - `B` audits your plan
 - `C` implements the approved plan
 - `D` reviews and tests the implementation
+- `E` audits the code for security vulnerabilities after code review
+- `F` generates the infrastructure scaffold after testing
 
 ## How You Work
 

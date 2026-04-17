@@ -14,7 +14,8 @@
     "test:planning": "node --experimental-strip-types scripts/test-pipeline-planning.mjs",
     "test:supervisor": "node --experimental-strip-types scripts/test-supervisor-snapshot.mjs",
     "test:supervisor-concept": "node --experimental-strip-types scripts/test-supervisor-concept.mjs",
-    "test:supervisor-intents": "node --experimental-strip-types scripts/test-supervisor-intents.mjs"
+    "test:supervisor-intents": "node --experimental-strip-types scripts/test-supervisor-intents.mjs",
+    "test:memory": "node --experimental-strip-types scripts/test-build-memory.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

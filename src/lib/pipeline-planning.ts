@@ -70,12 +70,13 @@ export function extractPlanningResearchSummary(events: PlanningEventLike[]): str
   return null;
 }
 
-export function buildPlanningResearchPrompt(phase0Context: string, concept: string): string {
+export function buildPlanningResearchPrompt(phase0Context: string, concept: string, memoryContext?: string): string {
   return [
     phase0Context
       ? phase0Context + 'Based on the conversation above, research the plan thoroughly before writing.'
       : `Build concept from the user: ${concept}`,
     '',
+    ...(memoryContext ? [memoryContext, ''] : []),
     'YOUR ONLY JOB RIGHT NOW: finish the research pass for plan.md.',
     '',
     'Follow these steps exactly:',

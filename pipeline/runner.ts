@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { basename, join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
-export type PipelineAgentId = 'A' | 'B' | 'C' | 'D' | 'S';
+export type PipelineAgentId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'S';
 export type RunnerMode = 'host' | 'docker' | 'auto';
 export type RunnerBackend = 'host' | 'docker';
 

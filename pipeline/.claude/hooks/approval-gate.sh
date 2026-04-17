@@ -56,7 +56,7 @@ fi
 
 # ── Reject unknown agent identity ────────────────────────────────────
 
-if [[ ! "$AGENT" =~ ^[ABCDS]$ ]]; then
+if [[ ! "$AGENT" =~ ^[ABCDEFS]$ ]]; then
   echo "BLOCKED: Unknown agent identity '$AGENT'" >&2
   exit 2
 fi
@@ -233,6 +233,16 @@ case "$TOOL_NAME" in
         echo "BLOCKED: Agent D cannot write files" >&2
         exit 2
         ;;
+      E)
+        echo "BLOCKED: Agent E cannot write files" >&2
+        exit 2
+        ;;
+      F)
+        if [[ "$FILENAME" == "plan.md" ]]; then
+          echo "BLOCKED: Agent F cannot modify plan.md — it is locked" >&2
+          exit 2
+        fi
+        ;;
     esac
 
     echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
@@ -250,6 +260,10 @@ if [ "$TOOL_NAME" = "Bash" ]; then
       ;;
     B)
       echo "BLOCKED: Agent B cannot run commands" >&2
+      exit 2
+      ;;
+    E)
+      echo "BLOCKED: Agent E cannot run commands" >&2
       exit 2
       ;;
   esac
@@ -303,7 +317,7 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   esac
 
   # In strict mode, all Bash from C/D requires explicit user approval.
-  if [ "$SECURITY_MODE" = "strict" ] && { [ "$AGENT" = "C" ] || [ "$AGENT" = "D" ]; }; then
+  if [ "$SECURITY_MODE" = "strict" ] && { [ "$AGENT" = "C" ] || [ "$AGENT" = "D" ] || [ "$AGENT" = "F" ]; }; then
     if [ -f "$APPROVED_BASH_FILE" ]; then
       GRANT_AGENT=$(jq -r '.agent // ""' "$APPROVED_BASH_FILE" 2>/dev/null || echo "")
       GRANT_COMMAND=$(jq -r '.command // ""' "$APPROVED_BASH_FILE" 2>/dev/null || echo "")

@@ -55,8 +55,8 @@ export interface ExecutionPathStatus {
 }
 
 function formatAgentStatuses(agentStatus: Record<string, string> | undefined): string {
-  if (!agentStatus) return 'A=idle, B=idle, C=idle, D=idle, S=idle';
-  return ['A', 'B', 'C', 'D', 'S']
+  if (!agentStatus) return 'A=idle, B=idle, C=idle, D=idle, E=idle, F=idle, S=idle';
+  return ['A', 'B', 'C', 'D', 'E', 'F', 'S']
     .map((agent) => `${agent}=${agentStatus[agent] || 'idle'}`)
     .join(', ');
 }
